@@ -7,6 +7,7 @@ import java.io.InputStream;
 import java.io.Serializable;
 import java.util.List;
 import java.util.Set;
+import net.sf.json.JSONObject;
 import org.jenkinsci.plugins.workflow.steps.Step;
 import org.jenkinsci.plugins.workflow.steps.StepContext;
 import org.jenkinsci.plugins.workflow.steps.StepDescriptor;
@@ -14,6 +15,7 @@ import org.jenkinsci.plugins.workflow.steps.StepExecution;
 import org.jenkinsci.plugins.workflow.steps.SynchronousNonBlockingStepExecution;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
+import org.kohsuke.stapler.StaplerRequest2;
 
 /** Pipeline step that uploads workspace files into the active CreateOS sandbox. */
 public class CreateOSUploadStep extends Step implements Serializable {
@@ -73,7 +75,7 @@ public class CreateOSUploadStep extends Step implements Serializable {
       CreateOSApiClient client =
           CreateOSStepSupport.resolveCloud(sandboxContext.cloudName()).buildApiClient();
 
-      FilePath sourcePath = workspace.child(step.getSource());
+      FilePath sourcePath = CreateOSStepSupport.workspacePath(workspace, step.getSource());
       if (!sourcePath.exists()) {
         throw new IllegalArgumentException("Upload source does not exist: " + step.getSource());
       }
@@ -139,6 +141,12 @@ public class CreateOSUploadStep extends Step implements Serializable {
   /** Descriptor for the createosUpload Pipeline step. */
   @Extension
   public static class DescriptorImpl extends StepDescriptor {
+
+    @Override
+    public Step newInstance(StaplerRequest2 request, JSONObject form) throws FormException {
+      CreateOSStepSupport.parseListField(form, "excludes");
+      return super.newInstance(request, form);
+    }
 
     @Override
     public String getFunctionName() {

@@ -19,7 +19,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
@@ -29,10 +28,12 @@ import java.util.logging.Logger;
 import java.util.stream.Stream;
 import jenkins.model.Jenkins;
 import jenkins.util.Timer;
+import net.sf.json.JSONObject;
 import org.jenkinsci.plugins.plaincredentials.StringCredentials;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
+import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.verb.POST;
 
 /** Jenkins cloud implementation that provisions ephemeral CreateOS sandbox agents. */
@@ -41,6 +42,7 @@ public class CreateOSCloud extends Cloud {
   private static final Logger LOGGER = Logger.getLogger(CreateOSCloud.class.getName());
 
   private String apiUrl;
+  private String displayName;
   private String credentialsId;
   private int containerCap;
   private List<SandboxTemplate> templates;
@@ -57,15 +59,13 @@ public class CreateOSCloud extends Cloud {
     this.templates = new ArrayList<>();
   }
 
-  // --- Speed up Jenkins NodeProvisioner + cleanup stale agents on startup ---
-
-  /** Applies low-latency Jenkins node provisioner settings during startup. */
-  @Initializer(after = InitMilestone.JOB_CONFIG_ADAPTED)
-  public static void speedUpProvisioner() {
-    System.setProperty("hudson.slaves.NodeProvisioner.MARGIN", "50");
-    System.setProperty("hudson.slaves.NodeProvisioner.MARGIN0", "0.85");
-    System.setProperty("hudson.slaves.NodeProvisioner.initialDelay", "0");
-    LOGGER.info("CreateOS: Accelerated NodeProvisioner settings applied");
+  @Override
+  public Cloud reconfigure(StaplerRequest2 request, JSONObject form)
+      throws Descriptor.FormException {
+    if (form != null) {
+      form.put("name", name);
+    }
+    return super.reconfigure(request, form);
   }
 
   /** Terminates CreateOS agents restored from an earlier controller process. */
@@ -74,26 +74,27 @@ public class CreateOSCloud extends Cloud {
     List<CreateOSSlave> toRemove = agents().map(CreateOSSlave.class::cast).toList();
     for (CreateOSSlave node : toRemove) {
       try {
-        LOGGER.info("Terminating stale agent: " + node.getNodeName());
+        LOGGER.fine("Terminating stale agent: " + node.getNodeName());
         node.terminate();
       } catch (Exception e) {
         LOGGER.log(Level.WARNING, "Failed to terminate stale agent", e);
       }
     }
     if (!toRemove.isEmpty()) {
-      LOGGER.info("Cleaned up " + toRemove.size() + " stale agent(s)");
+      LOGGER.fine("Cleaned up " + toRemove.size() + " stale agent(s)");
     }
   }
 
   // --- Core Cloud methods ---
 
   @Override
-  public boolean canProvision(Label label) {
-    return getTemplateFor(label) != null;
+  public boolean canProvision(CloudState state) {
+    return getTemplateFor(state.getLabel()) != null;
   }
 
   @Override
-  public Collection<PlannedNode> provision(Label label, int excessWorkload) {
+  public Collection<PlannedNode> provision(CloudState state, int excessWorkload) {
+    Label label = state.getLabel();
     SandboxTemplate template = getTemplateFor(label);
     if (template == null) {
       return Collections.emptyList();
@@ -102,27 +103,16 @@ public class CreateOSCloud extends Cloud {
     int currentCount = countCurrentAgents();
     int pendingCount = countPendingAgents();
     if (currentCount + pendingCount >= containerCap) {
-      LOGGER.info("Container cap reached (" + containerCap + "), cannot provision more");
+      LOGGER.fine("Container cap reached (" + containerCap + "), cannot provision more");
       return Collections.emptyList();
     }
 
-    int queuedWorkload = countQueuedWorkload(label);
-    int unusedCapacity = countUnusedAgents();
-    int neededCapacity = Math.max(0, queuedWorkload - unusedCapacity - pendingCount);
-    int toProvision = Math.min(neededCapacity, containerCap - currentCount - pendingCount);
+    int toProvision = Math.min(excessWorkload, containerCap - currentCount - pendingCount);
     if (toProvision == 0) {
       return Collections.emptyList();
     }
 
-    LOGGER.info(
-        "CreateOS capacity: queued="
-            + queuedWorkload
-            + ", unused="
-            + unusedCapacity
-            + ", pending="
-            + pendingCount
-            + ", provisioning="
-            + toProvision);
+    LOGGER.fine("CreateOS provisioning " + toProvision + " agent(s)");
     List<PlannedNode> planned = new ArrayList<>();
 
     for (int i = 0; i < toProvision; i++) {
@@ -134,7 +124,7 @@ public class CreateOSCloud extends Cloud {
           Computer.threadPoolForRemoting.submit(
               () -> {
                 try {
-                  LOGGER.info("Provisioning CreateOS sandbox agent: " + agentName);
+                  LOGGER.fine("Provisioning CreateOS sandbox agent: " + agentName);
                   Node node = new CreateOSSlave(agentName, template, this);
 
                   // NodeProvisioner does not wake when a PlannedNode future completes.
@@ -223,37 +213,21 @@ public class CreateOSCloud extends Cloud {
   // A newly registered node may not be online, connecting, or have a sandbox ID yet. It still
   // represents capacity Jenkins already requested and must count toward the cap.
   private int countCurrentAgents() {
-    return (int) agents().count();
-  }
-
-  private int countUnusedAgents() {
-    return (int)
-        agents()
-            .map(Node::toComputer)
-            .filter(computer -> computer == null || computer.isAcceptingTasks())
-            .count();
+    return (int) ownedAgents().count();
   }
 
   private static Stream<Node> agents() {
     return Jenkins.get().getNodes().stream().filter(CreateOSSlave.class::isInstance);
   }
 
-  // Objects.equals and not label.equals: Jenkins passes a null label for work that names
-  // no label at all, which is what `agent any` produces. label.equals(...) then threw an
-  // NPE out of provision() into the NodeProvisioner timer, killing the timer task — so a
-  // single unlabelled job stopped provisioning for every job on the controller, and the
-  // only visible symptom was builds sitting on "Waiting for next available executor".
-  // Null matches items that carry no assigned label, which is the workload being asked
-  // about.
-  private int countQueuedWorkload(Label label) {
-    return (int)
-        Jenkins.get().getQueue().getBuildableItems().stream()
-            .filter(item -> Objects.equals(label, item.getAssignedLabel()))
-            .count();
+  private Stream<CreateOSSlave> ownedAgents() {
+    return agents()
+        .map(CreateOSSlave.class::cast)
+        .filter(agent -> name.equals(agent.getCloudName()));
   }
 
   private int countPendingAgents() {
-    getPendingAgentNames().removeAll(agents().map(Node::getNodeName).toList());
+    getPendingAgentNames().removeAll(ownedAgents().map(Node::getNodeName).toList());
     return getPendingAgentNames().size();
   }
 
@@ -291,6 +265,16 @@ public class CreateOSCloud extends Cloud {
 
   public String getApiUrl() {
     return apiUrl;
+  }
+
+  @Override
+  public String getDisplayName() {
+    return displayName == null || displayName.isBlank() ? name : displayName;
+  }
+
+  @DataBoundSetter
+  public void setDisplayName(String displayName) {
+    this.displayName = displayName;
   }
 
   @DataBoundSetter
@@ -365,7 +349,7 @@ public class CreateOSCloud extends Cloud {
       return FormValidation.ok();
     }
 
-    /** Validates access to the configured CreateOS credential. */
+    /** Tests the configured credential against the CreateOS API. */
     @POST
     public FormValidation doTestConnection(
         @QueryParameter String apiUrl, @QueryParameter String credentialsId) {
@@ -381,6 +365,7 @@ public class CreateOSCloud extends Cloud {
         if (cred == null) {
           return FormValidation.error("Credential not found");
         }
+        new CreateOSApiClient(apiUrl, cred.getSecret().getPlainText()).testConnection();
         return FormValidation.ok("Connection successful");
       } catch (Exception e) {
         return FormValidation.error("Failed: " + e.getMessage());

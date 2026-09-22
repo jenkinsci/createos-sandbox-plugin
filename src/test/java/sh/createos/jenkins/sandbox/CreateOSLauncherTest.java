@@ -112,7 +112,8 @@ class CreateOSLauncherTest {
     String command =
         CreateOSLauncher.sshPrepareCommand(template, "builder", tmp.resolve("run-sshd").toString());
     String out =
-        runBash(command, Map.of("PATH", bin + System.getProperty("path.separator") + "/usr/bin"));
+        runBash(
+            command, Map.of("PATH", bin + System.getProperty("path.separator") + "/usr/bin:/bin"));
 
     assertEquals("", out);
     assertEquals(

@@ -88,6 +88,10 @@ public class CreateOSSlave extends AbstractCloudSlave {
     return (CreateOSCloud) Jenkins.get().getCloud(cloudName);
   }
 
+  String getCloudName() {
+    return cloudName;
+  }
+
   public String getSandboxId() {
     return sandboxId;
   }

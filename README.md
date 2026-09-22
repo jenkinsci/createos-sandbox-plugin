@@ -386,8 +386,8 @@ checksums. The image build fails closed on a mismatch.
 ```
 Pipeline enters queue for a configured label
   → CreateOSQueueListener requests an immediate provisioning review
-  → CreateOSCloud.provision() counts queued, registered, and pending capacity
-  → one CreateOSSlave is planned per queued build (up to containerCap)
+  → CreateOSCloud.provision() uses Jenkins' excess workload and the container cap
+  → one CreateOSSlave is planned per requested executor (up to containerCap)
   → completed PlannedNode future wakes NodeProvisioner
   → CreateOSLauncher.launch():
       1. POST /v1/sandboxes

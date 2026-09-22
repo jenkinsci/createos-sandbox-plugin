@@ -57,18 +57,20 @@ public class CreateOSDownloadStep extends Step implements Serializable {
       CreateOSStepSupport.requireAbsoluteRemotePath(step.getSource(), "source");
       CreateOSSandboxContext sandboxContext = getContext().get(CreateOSSandboxContext.class);
       FilePath workspace = getContext().get(FilePath.class);
-      TaskListener listener = getContext().get(TaskListener.class);
       CreateOSApiClient client =
           CreateOSStepSupport.resolveCloud(sandboxContext.cloudName()).buildApiClient();
 
-      FilePath targetPath = workspace.child(step.getTarget());
+      FilePath targetPath = CreateOSStepSupport.workspacePath(workspace, step.getTarget());
       FilePath parent = targetPath.getParent();
       if (parent != null) {
         parent.mkdirs();
       }
+      // Recheck after creating parents so a symlink cannot redirect the write.
+      targetPath = CreateOSStepSupport.workspacePath(workspace, step.getTarget());
       try (OutputStream output = targetPath.write()) {
         client.downloadFile(sandboxContext.sandboxId(), step.getSource(), output);
       }
+      TaskListener listener = getContext().get(TaskListener.class);
       listener.getLogger().println("Downloaded " + step.getSource() + " to " + step.getTarget());
       return null;
     }

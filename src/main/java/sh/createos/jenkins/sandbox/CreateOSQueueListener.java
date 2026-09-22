@@ -5,6 +5,7 @@ import hudson.model.Label;
 import hudson.model.Queue;
 import hudson.model.queue.QueueListener;
 import hudson.slaves.Cloud;
+import hudson.slaves.Cloud.CloudState;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
@@ -24,8 +25,8 @@ public class CreateOSQueueListener extends QueueListener {
     }
 
     for (Cloud cloud : Jenkins.get().clouds) {
-      if (cloud instanceof CreateOSCloud && cloud.canProvision(label)) {
-        LOGGER.info("Requesting immediate provisioning review for label: " + label.getName());
+      if (cloud instanceof CreateOSCloud && cloud.canProvision(new CloudState(label, 0))) {
+        LOGGER.fine("Requesting immediate provisioning review for label: " + label.getName());
         label.nodeProvisioner.suggestReviewNow();
 
         // Jenkins coalesces suggestions while a review is already queued. A burst

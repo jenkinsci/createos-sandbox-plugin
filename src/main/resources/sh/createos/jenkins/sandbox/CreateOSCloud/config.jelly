@@ -10,9 +10,9 @@
          xmlns:f="/lib/form"
          xmlns:c="/lib/credentials">
 
-    <f:entry title="Name" field="name"
-             description="Name for this cloud, used in logs and in `Manage Jenkins > Clouds`">
-        <f:textbox default="createos" />
+    <f:entry title="Display Name" field="displayName"
+             description="Optional name shown in Manage Jenkins > Clouds. The cloud identifier cannot be changed here.">
+        <f:textbox />
     </f:entry>
 
     <f:entry title="API URL" field="apiUrl"
@@ -34,8 +34,11 @@
                       method="testConnection"
                       with="apiUrl,credentialsId" />
 
-    <f:entry title="Sandbox Templates">
-        <f:repeatableProperty field="templates" />
+    <f:entry title="Sandbox Templates"
+             description="Templates are checked in this order when labels overlap. Drag to reorder.">
+        <f:repeatableProperty field="templates" header="Template" />
     </f:entry>
+
+    <f:entry description="Controller restarts terminate CreateOS agents and destroy their sandboxes. Running builds on these agents are interrupted; archive needed output before restarting." />
 
 </j:jelly>

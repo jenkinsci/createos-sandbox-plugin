@@ -60,6 +60,7 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
   private String sshCredentialsId;
 
   /** Public key matching sshCredentialsId, injected into the sandbox before sshd starts. */
+  // lgtm[jenkins/plaintext-storage] An OpenSSH public key is intended to be shared.
   private String sshPublicKey;
 
   /** Whether Jenkinsfiles may override this template through the createos Declarative agent. */

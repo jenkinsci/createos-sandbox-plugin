@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import net.sf.json.JSONObject;
 import org.jenkinsci.plugins.workflow.steps.BodyExecutionCallback;
 import org.jenkinsci.plugins.workflow.steps.Step;
 import org.jenkinsci.plugins.workflow.steps.StepContext;
@@ -16,6 +17,7 @@ import org.jenkinsci.plugins.workflow.steps.StepDescriptor;
 import org.jenkinsci.plugins.workflow.steps.StepExecution;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
+import org.kohsuke.stapler.StaplerRequest2;
 
 /** Pipeline block step that creates a CreateOS sandbox for exec-mode child steps. */
 public class CreateOSSandboxStep extends Step implements Serializable, CreateOSTemplateOverrides {
@@ -210,6 +212,12 @@ public class CreateOSSandboxStep extends Step implements Serializable, CreateOST
   /** Descriptor for the createosSandbox Pipeline step. */
   @Extension
   public static class DescriptorImpl extends StepDescriptor {
+
+    @Override
+    public Step newInstance(StaplerRequest2 request, JSONObject form) throws FormException {
+      CreateOSStepSupport.parseListField(form, "networks");
+      return super.newInstance(request, form);
+    }
 
     @Override
     public String getFunctionName() {

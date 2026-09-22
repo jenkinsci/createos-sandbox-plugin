@@ -1,9 +1,13 @@
 package sh.createos.jenkins.sandbox;
 
+import hudson.FilePath;
+import hudson.Util;
 import hudson.slaves.Cloud;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 import jenkins.model.Jenkins;
+import net.sf.json.JSONObject;
 
 /** Shared helpers for CreateOS Pipeline steps. */
 final class CreateOSStepSupport {
@@ -90,6 +94,28 @@ final class CreateOSStepSupport {
     String normalizedBase = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
     String normalizedRelative = relative.startsWith("/") ? relative.substring(1) : relative;
     return normalizedBase + "/" + normalizedRelative;
+  }
+
+  static FilePath workspacePath(FilePath workspace, String path)
+      throws IOException, InterruptedException {
+    if (path == null
+        || path.isBlank()
+        || !Util.isRelativePath(path)
+        || !workspace.isDescendant(path)) {
+      throw new IllegalArgumentException("Path must stay inside the workspace: " + path);
+    }
+    return workspace.child(path);
+  }
+
+  static void parseListField(JSONObject form, String field) {
+    if (form.opt(field) instanceof String text) {
+      form.put(
+          field,
+          Arrays.stream(text.split("[,\\r\\n]"))
+              .map(String::trim)
+              .filter(value -> !value.isEmpty())
+              .toList());
+    }
   }
 
   static void requireAbsoluteRemotePath(String path, String fieldName) {

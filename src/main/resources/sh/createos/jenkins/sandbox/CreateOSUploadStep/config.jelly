@@ -1,0 +1,6 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+    <f:entry title="Workspace source" field="source"><f:textbox /></f:entry>
+    <f:entry title="Sandbox target" field="target"><f:textbox /></f:entry>
+    <f:entry title="Excludes" field="excludes" description="Patterns separated by commas or new lines."><f:textarea /></f:entry>
+</j:jelly>

@@ -3,6 +3,7 @@ package sh.createos.jenkins.sandbox;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import hudson.ProxyConfiguration;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -30,6 +31,7 @@ public class CreateOSApiClient {
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
   private final String baseUrl;
+  // lgtm[jenkins/plaintext-storage] This client is transient and never persisted in Jenkins XML.
   private final String apiKey;
   private final HttpClient httpClient;
 
@@ -37,7 +39,8 @@ public class CreateOSApiClient {
   public CreateOSApiClient(String baseUrl, String apiKey) {
     this.baseUrl = baseUrl.replaceAll("/+$", "");
     this.apiKey = apiKey;
-    this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
+    this.httpClient =
+        ProxyConfiguration.newHttpClientBuilder().connectTimeout(Duration.ofSeconds(30)).build();
   }
 
   String baseUrl() {
@@ -46,6 +49,11 @@ public class CreateOSApiClient {
 
   String apiKey() {
     return apiKey;
+  }
+
+  /** Verify that this API key can access the CreateOS sandbox endpoint. */
+  public void testConnection() throws IOException {
+    get("/v1/sandboxes");
   }
 
   /**
@@ -89,7 +97,7 @@ public class CreateOSApiClient {
 
     JsonNode data = post("/v1/sandboxes", body);
     String sandboxId = data.get("id").asText();
-    LOGGER.info("Created sandbox: " + sandboxId);
+    LOGGER.fine("Created sandbox: " + sandboxId);
     return sandboxId;
   }
 
@@ -331,7 +339,7 @@ public class CreateOSApiClient {
       Thread.currentThread().interrupt();
       throw new IOException("Interrupted while destroying sandbox", e);
     }
-    LOGGER.info("Destroyed sandbox: " + sandboxId);
+    LOGGER.fine("Destroyed sandbox: " + sandboxId);
   }
 
   /** Poll until sandbox reaches "running" state. */
@@ -343,7 +351,7 @@ public class CreateOSApiClient {
       String status = getSandboxStatus(sandboxId);
 
       if ("running".equals(status)) {
-        LOGGER.info("Sandbox " + sandboxId + " is running");
+        LOGGER.fine("Sandbox " + sandboxId + " is running");
         return;
       }
       if ("error".equals(status)) {

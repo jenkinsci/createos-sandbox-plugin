@@ -1,17 +1,23 @@
 package sh.createos.jenkins.sandbox;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import hudson.model.FreeStyleProject;
+import com.cloudbees.plugins.credentials.CredentialsScope;
+import com.cloudbees.plugins.credentials.SystemCredentialsProvider;
+import com.sun.net.httpserver.HttpServer;
 import hudson.model.Label;
+import hudson.slaves.Cloud.CloudState;
 import hudson.util.FormValidation;
+import hudson.util.Secret;
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -29,36 +35,78 @@ class CreateOSCloudTest {
   void canProvisionMatchesOnlyItsOwnLabel(JenkinsRule r) {
     CreateOSCloud cloud = cloudWithTemplate("createos");
 
-    assertTrue(cloud.canProvision(Label.get("createos")));
-    assertFalse(cloud.canProvision(Label.get("some-other-label")));
+    assertTrue(cloud.canProvision(new CloudState(Label.get("createos"), 0)));
+    assertFalse(cloud.canProvision(new CloudState(Label.get("some-other-label"), 0)));
     // `agent any` reaches the cloud with a null Label. CreateOSSlave is EXCLUSIVE, so a sandbox
     // provisioned for it could never accept the job — claiming it would leak one sandbox per
     // provisioner cycle on a controller with zero executors.
-    assertFalse(cloud.canProvision((Label) null));
+    assertFalse(cloud.canProvision(new CloudState(null, 0)));
   }
 
-  /**
-   * Regression: an unlabelled job (`agent any`) reaches provision() with a null Label.
-   * Dereferencing it threw out of provision() into the NodeProvisioner timer and killed the timer
-   * task, so every job on the controller stopped being provisioned for — not just the unlabelled
-   * one. The only visible symptom was builds stuck on "Waiting for next available executor".
-   *
-   * <p>The queued build is what makes this test bite: with an empty queue the workload count is
-   * zero and provision() returns before reaching any of the null-label paths.
-   */
+  /** An unlabelled job cannot run on an exclusive CreateOS agent. */
   @Test
-  void provisionSurvivesAnUnlabelledQueuedBuild(JenkinsRule r) throws Exception {
-    r.jenkins.setNumExecutors(0);
-    FreeStyleProject unlabelled = r.createFreeStyleProject();
-    unlabelled.scheduleBuild2(0);
-    r.jenkins.getQueue().maintain();
-
+  void unlabelledWorkIsNotProvisioned(JenkinsRule r) {
     CreateOSCloud cloud = cloudWithTemplate("createos");
 
-    // Cast because Cloud also declares provision(CloudState, int); this plugin overrides the
-    // Label overload, which is the one Jenkins reaches with a null Label.
-    assertDoesNotThrow(() -> cloud.provision((Label) null, 1));
-    assertTrue(cloud.provision((Label) null, 1).isEmpty(), "no sandbox for an unlabelled job");
+    CloudState state = new CloudState(null, 0);
+    assertTrue(cloud.provision(state, 1).isEmpty(), "no sandbox for an unlabelled job");
+  }
+
+  @Test
+  void provisionUsesJenkinsExcessWorkload(JenkinsRule r) {
+    CreateOSCloud cloud = cloudWithTemplate("createos");
+    cloud.setContainerCap(1);
+
+    assertEquals(1, cloud.provision(new CloudState(Label.get("createos"), 0), 1).size());
+  }
+
+  @Test
+  void containerCapDoesNotCountAgentsFromAnotherCloud(JenkinsRule r) throws Exception {
+    CreateOSCloud first = cloudWithTemplate("first");
+    CreateOSCloud second = new CreateOSCloud("second");
+    second.setContainerCap(1);
+    second.setTemplates(List.of(new SandboxTemplate("second", "s-1vcpu-1gb", "devbox:1")));
+    r.jenkins.addNode(new CreateOSSlave("first-agent", first.getTemplates().get(0), first));
+
+    assertEquals(1, second.provision(new CloudState(Label.get("second"), 0), 1).size());
+  }
+
+  @Test
+  void testConnectionCallsCreateOsWithConfiguredKey(JenkinsRule r) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/v1/sandboxes",
+        exchange -> {
+          boolean authorized = "sk-test".equals(exchange.getRequestHeaders().getFirst("x-api-key"));
+          byte[] body =
+              (authorized ? "{\"data\":[]}" : "unauthorized").getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(authorized ? 200 : 401, body.length);
+          exchange.getResponseBody().write(body);
+          exchange.close();
+        });
+    server.start();
+    try {
+      SystemCredentialsProvider.getInstance()
+          .getCredentials()
+          .add(
+              new StringCredentialsImpl(
+                  CredentialsScope.GLOBAL, "createos-test", "Test", Secret.fromString("sk-test")));
+      SystemCredentialsProvider.getInstance()
+          .getCredentials()
+          .add(
+              new StringCredentialsImpl(
+                  CredentialsScope.GLOBAL, "createos-wrong", "Wrong", Secret.fromString("bad")));
+      CreateOSCloud.DescriptorImpl descriptor =
+          r.jenkins.getDescriptorByType(CreateOSCloud.DescriptorImpl.class);
+      String url = "http://127.0.0.1:" + server.getAddress().getPort();
+
+      assertEquals(FormValidation.Kind.OK, descriptor.doTestConnection(url, "createos-test").kind);
+      assertEquals(
+          FormValidation.Kind.ERROR, descriptor.doTestConnection(url, "createos-wrong").kind);
+      assertEquals(FormValidation.Kind.ERROR, descriptor.doTestConnection(url, "missing").kind);
+    } finally {
+      server.stop(0);
+    }
   }
 
   @Test
@@ -91,7 +139,7 @@ class CreateOSCloudTest {
         "CreateOS Pipeline-defined overrides are disabled for template: createos",
         thrown.getMessage());
     assertNull(cloud.getTemplateByLabel("createos-generated"));
-    assertFalse(cloud.canProvision(Label.get("createos-generated")));
+    assertFalse(cloud.canProvision(new CloudState(Label.get("createos-generated"), 0)));
   }
 
   @Test
@@ -111,7 +159,7 @@ class CreateOSCloudTest {
         "CreateOS Declarative agents must inherit from an administrator-defined template",
         thrown.getMessage());
     assertNull(cloud.getTemplateByLabel("createos-generated"));
-    assertFalse(cloud.canProvision(Label.get("createos-generated")));
+    assertFalse(cloud.canProvision(new CloudState(Label.get("createos-generated"), 0)));
   }
 
   @Test
@@ -128,7 +176,7 @@ class CreateOSCloudTest {
     String label = CreateOSPipelineSupport.register(agent, "createos-generated");
 
     assertEquals("createos-generated", label);
-    assertTrue(cloud.canProvision(Label.get("createos-generated")));
+    assertTrue(cloud.canProvision(new CloudState(Label.get("createos-generated"), 0)));
   }
 
   @Test

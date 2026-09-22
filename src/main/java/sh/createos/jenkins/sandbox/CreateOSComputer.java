@@ -21,7 +21,7 @@ public class CreateOSComputer extends AbstractCloudComputer<CreateOSSlave> {
   @Override
   public void taskAccepted(Executor executor, Queue.Task task) {
     super.taskAccepted(executor, task);
-    LOGGER.info("CreateOS agent " + getName() + " accepted task: " + task.getDisplayName());
+    LOGGER.fine("CreateOS agent " + getName() + " accepted task: " + task.getDisplayName());
 
     // This is a one-shot agent. Stop the queue from selecting it for another build
     // while its current build is still running, then provision for remaining work.

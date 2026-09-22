@@ -1,0 +1,11 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+    <f:entry title="Cloud" field="cloud"><f:textbox /></f:entry>
+    <f:entry title="Inherit from template" field="inheritFrom"><f:textbox /></f:entry>
+    <f:entry title="Shape" field="shape"><f:textbox /></f:entry>
+    <f:entry title="Root filesystem" field="rootfs"><f:textbox /></f:entry>
+    <f:entry title="Region" field="region"><f:textbox /></f:entry>
+    <f:entry title="Root disk size (MiB)" field="diskMiB"><f:number min="0" /></f:entry>
+    <f:entry title="Networks" field="networks" description="Network IDs or names, separated by commas or new lines."><f:textarea /></f:entry>
+    <f:entry title="Disks"><f:repeatableProperty field="disks" /></f:entry>
+</j:jelly>
