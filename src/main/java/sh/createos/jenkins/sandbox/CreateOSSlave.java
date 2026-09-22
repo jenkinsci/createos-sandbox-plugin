@@ -156,8 +156,21 @@ public class CreateOSSlave extends AbstractCloudSlave {
     }
   }
 
+  /**
+   * Records which sandbox backs this agent, and writes it to disk immediately.
+   *
+   * <p>The save is what makes a restart survivable. The node is persisted when it is added, which
+   * happens before the launcher has created the sandbox, so without saving again the id is only
+   * ever in memory: after a restart the restored node knows of no sandbox, recovery finds nothing
+   * to reconnect to, and the agent is terminated while its sandbox keeps running.
+   */
   public void setSandboxId(String sandboxId) {
     this.sandboxId = sandboxId;
+    try {
+      save();
+    } catch (IOException e) {
+      LOGGER.log(Level.WARNING, "Could not persist sandbox id for " + getNodeName(), e);
+    }
   }
 
   public SandboxTemplate getTemplate() {

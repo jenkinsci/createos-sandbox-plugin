@@ -15,7 +15,6 @@ import hudson.slaves.NodeProvisioner.PlannedNode;
 import hudson.slaves.SlaveComputer;
 import hudson.util.FormValidation;
 import hudson.util.ListBoxModel;
-import hudson.util.LogTaskListener;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -111,21 +110,24 @@ public class CreateOSCloud extends Cloud {
     }
   }
 
+  /**
+   * Keeps a recoverable agent alive and lets Jenkins connect it.
+   *
+   * <p>Deliberately does not launch the agent itself. Jenkins connects a restored node through its
+   * retention strategy once the computer list is built, and this runs earlier — from {@code
+   * onLoaded()}, before that happens. Launching here as well produced two connections to the same
+   * computer: the manual one completed a full SSH handshake and remoting handshake, then died on
+   * {@code IllegalStateException: Already connected} in {@link SlaveComputer#setChannel}, taking
+   * the working channel down with it and leaving the build waiting for an agent that never
+   * returned. Not terminating the node is the whole of what recovery has to do.
+   */
   private static void reconnect(CreateOSSlave node) {
     Computer computer = node.toComputer();
     if (!(computer instanceof SlaveComputer slaveComputer)) {
       terminateQuietly(node);
       return;
     }
-    LOGGER.info("Reconnecting CreateOS agent to its surviving sandbox: " + node.getNodeName());
-    Computer.threadPoolForRemoting.submit(
-        () -> {
-          try {
-            node.getLauncher().launch(slaveComputer, new LogTaskListener(LOGGER, Level.INFO));
-          } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Failed to reconnect " + node.getNodeName(), e);
-          }
-        });
+    LOGGER.info("Keeping CreateOS agent with a surviving sandbox: " + node.getNodeName());
 
     // A reconnection that never completes would hold a sandbox open indefinitely, so the
     // agent gets a deadline rather than the benefit of the doubt.
@@ -144,7 +146,7 @@ public class CreateOSCloud extends Cloud {
 
   private static void terminateQuietly(CreateOSSlave node) {
     try {
-      LOGGER.fine("Terminating stale agent: " + node.getNodeName());
+      LOGGER.info("Terminating stale agent, nothing to reconnect to: " + node.getNodeName());
       node.terminate();
     } catch (Exception e) {
       LOGGER.log(Level.WARNING, "Failed to terminate stale agent", e);
