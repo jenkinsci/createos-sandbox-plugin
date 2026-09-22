@@ -2,13 +2,14 @@ package sh.createos.jenkins.sandbox;
 
 import hudson.Extension;
 import hudson.model.AsyncPeriodicWork;
+import hudson.model.Node;
 import hudson.model.TaskListener;
 import hudson.slaves.Cloud;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
@@ -60,10 +61,7 @@ public class CreateOSSandboxSweep extends AsyncPeriodicWork {
   private static void sweep(CreateOSCloud cloud) throws Exception {
     CreateOSApiClient client = cloud.buildApiClient();
     List<SandboxSummary> orphans =
-        reclaimable(
-            client.listSandboxes(),
-            cloud.pendingAgentNames(),
-            agentName -> Jenkins.get().getNode(agentName) != null);
+        reclaimable(client.listSandboxes(), claimedSandboxIds(), pendingSandboxNames(cloud));
 
     for (SandboxSummary orphan : orphans) {
       try {
@@ -75,25 +73,52 @@ public class CreateOSSandboxSweep extends AsyncPeriodicWork {
     }
   }
 
+  /** Every sandbox id some node on this controller still answers for. */
+  private static Set<String> claimedSandboxIds() {
+    Set<String> claimed = new HashSet<>();
+    for (Node node : Jenkins.get().getNodes()) {
+      if (node instanceof CreateOSSlave slave && slave.getSandboxId() != null) {
+        claimed.add(slave.getSandboxId());
+      }
+    }
+    return claimed;
+  }
+
+  /**
+   * Names of sandboxes being provisioned right now. A launch in flight has already created its
+   * sandbox but has not yet recorded the id on a node, so its id cannot be matched — the name can,
+   * because it is derived from the agent name the cloud is already tracking.
+   */
+  private static Set<String> pendingSandboxNames(CreateOSCloud cloud) {
+    Set<String> pending = new HashSet<>();
+    for (String agentName : cloud.pendingAgentNames()) {
+      pending.add(CreateOSSlave.sandboxName(agentName));
+    }
+    return pending;
+  }
+
   /**
    * Selects the sandboxes that belong to this controller but to no live or planned agent.
+   *
+   * <p>Matched by sandbox id rather than by name, because the API's 22-character name cap leaves no
+   * room to encode which agent a sandbox belongs to. The node persists the id, so that is the link;
+   * the name only says which controller created it.
    *
    * <p>Separated from the API calls so the decision can be tested directly: the cost of getting it
    * wrong is either a leaked microVM or, worse, destroying a sandbox out from under a running
    * build.
    */
   static List<SandboxSummary> reclaimable(
-      List<SandboxSummary> sandboxes, Set<String> pendingAgentNames, Predicate<String> nodeExists) {
+      List<SandboxSummary> sandboxes, Set<String> claimedSandboxIds, Set<String> pendingNames) {
     List<SandboxSummary> orphans = new ArrayList<>();
     for (SandboxSummary sandbox : sandboxes) {
-      String agentName = CreateOSSlave.agentNameOf(sandbox.name());
-      if (agentName == null) {
+      if (!CreateOSSlave.namedByThisController(sandbox.name())) {
         continue; // Another controller's sandbox, or a human's.
       }
-      if (nodeExists.test(agentName)) {
+      if (claimedSandboxIds.contains(sandbox.id())) {
         continue; // Claimed by a live agent.
       }
-      if (pendingAgentNames.contains(agentName)) {
+      if (pendingNames.contains(sandbox.name())) {
         continue; // Provisioning is still in flight; the node does not exist yet.
       }
       orphans.add(sandbox);

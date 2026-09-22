@@ -7,6 +7,9 @@ import hudson.model.TaskListener;
 import hudson.slaves.AbstractCloudComputer;
 import hudson.slaves.AbstractCloudSlave;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
@@ -18,7 +21,12 @@ public class CreateOSSlave extends AbstractCloudSlave {
   private static final long serialVersionUID = 1L;
   private static final Logger LOGGER = Logger.getLogger(CreateOSSlave.class.getName());
 
-  private static final String SANDBOX_NAME_PREFIX = "jenkins-";
+  /** The CreateOS API rejects a longer sandbox name outright, failing every agent launch. */
+  private static final int SANDBOX_NAME_MAX = 22;
+
+  private static final String SANDBOX_NAME_PREFIX = "jk-";
+  private static final int SANDBOX_NAME_SUFFIX_LENGTH =
+      SANDBOX_NAME_MAX - SANDBOX_NAME_PREFIX.length() - 6 - 1;
 
   private volatile String sandboxId;
   private final SandboxTemplate template;
@@ -104,28 +112,48 @@ public class CreateOSSlave extends AbstractCloudSlave {
   }
 
   /**
-   * Names the sandbox after both the agent and this controller.
+   * Names the sandbox so this controller can recognise it later.
+   *
+   * <p>The CreateOS API caps a sandbox name at {@value #SANDBOX_NAME_MAX} characters, which is far
+   * too short to carry an agent name — so the name identifies the controller and nothing else, and
+   * the agent it belongs to is matched by sandbox id, which the node persists. The suffix is a
+   * digest of the agent name purely to keep names unique and reproducible; nothing reads it back.
    *
    * <p>The controller half matters when several Jenkins instances share one CreateOS account: the
    * orphan sweep destroys sandboxes whose agent is gone, and without it one controller would reap
    * another's running agents.
    */
   static String sandboxName(String agentName) {
-    return sandboxNamePrefix() + agentName;
+    return sandboxNamePrefix() + digest(agentName, SANDBOX_NAME_SUFFIX_LENGTH);
   }
 
   /** The prefix every sandbox created by this controller carries. */
   static String sandboxNamePrefix() {
-    String instanceId = Jenkins.get().getLegacyInstanceId();
-    return SANDBOX_NAME_PREFIX + instanceId.substring(0, Math.min(8, instanceId.length())) + "-";
+    return SANDBOX_NAME_PREFIX + digest(Jenkins.get().getLegacyInstanceId(), 6) + "-";
   }
 
-  /** Recovers the agent name from a sandbox this controller named, or null if it did not. */
-  static String agentNameOf(String sandboxName) {
-    String prefix = sandboxNamePrefix();
-    return sandboxName != null && sandboxName.startsWith(prefix)
-        ? sandboxName.substring(prefix.length())
-        : null;
+  /** Whether a sandbox was named by this controller, and so is this controller's to reclaim. */
+  static boolean namedByThisController(String sandboxName) {
+    return sandboxName != null && sandboxName.startsWith(sandboxNamePrefix());
+  }
+
+  /**
+   * Lowercase hex of a SHA-256 prefix. Only has to be stable and collision-free in practice, not
+   * secret — the instance id it is derived from is not one either, but hashing keeps the name
+   * inside the API's length cap and its character set.
+   */
+  private static String digest(String value, int length) {
+    try {
+      byte[] hash =
+          MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+      StringBuilder hex = new StringBuilder();
+      for (int i = 0; hex.length() < length; i++) {
+        hex.append(String.format("%02x", hash[i]));
+      }
+      return hex.substring(0, length);
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 is required by every JVM", e);
+    }
   }
 
   public void setSandboxId(String sandboxId) {
