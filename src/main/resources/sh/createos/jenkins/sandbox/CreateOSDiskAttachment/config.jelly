@@ -4,7 +4,7 @@
 
     <f:entry title="ID" field="id"
              description="ID or name of a disk that already exists in CreateOS. Create the disk in CreateOS first. This field does not create a new disk.">
-        <f:textbox />
+        <f:textbox clazz="required" checkMessage="Disk id or name is required" />
     </f:entry>
 
     <f:entry title="Mount Path" field="mountPath"

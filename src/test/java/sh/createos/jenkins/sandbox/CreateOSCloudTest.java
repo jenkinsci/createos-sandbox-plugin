@@ -110,16 +110,6 @@ class CreateOSCloudTest {
   }
 
   @Test
-  void templateWithoutLabelIsRejected(JenkinsRule r) {
-    SandboxTemplate.DescriptorImpl descriptor =
-        r.jenkins.getDescriptorByType(SandboxTemplate.DescriptorImpl.class);
-
-    assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckLabel("").kind);
-    assertEquals(FormValidation.Kind.ERROR, descriptor.doCheckLabel(null).kind);
-    assertEquals(FormValidation.Kind.OK, descriptor.doCheckLabel("createos").kind);
-  }
-
-  @Test
   void declarativeOverridesAreRejectedWhenTemplateDisablesThem(JenkinsRule r) {
     SandboxTemplate template = new SandboxTemplate("createos", "s-1vcpu-1gb", "devbox:1");
     template.setAllowPipelineOverrides(false);

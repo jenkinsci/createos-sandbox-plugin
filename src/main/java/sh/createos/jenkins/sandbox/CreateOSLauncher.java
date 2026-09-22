@@ -1,21 +1,17 @@
 package sh.createos.jenkins.sandbox;
 
 import com.cloudbees.jenkins.plugins.sshcredentials.SSHUserPrivateKey;
-import com.cloudbees.plugins.credentials.CredentialsMatchers;
-import com.cloudbees.plugins.credentials.CredentialsProvider;
 import com.fasterxml.jackson.databind.JsonNode;
 import hudson.model.Descriptor;
 import hudson.model.TaskListener;
 import hudson.plugins.sshslaves.SSHLauncher;
 import hudson.plugins.sshslaves.verifiers.NonVerifyingKeyVerificationStrategy;
-import hudson.security.ACL;
 import hudson.slaves.ComputerLauncher;
 import hudson.slaves.JNLPLauncher;
 import hudson.slaves.SlaveComputer;
 import java.time.Duration;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import jenkins.model.Jenkins;
 
 /** Creates a CreateOS sandbox and launches a Jenkins agent inside it. */
 public class CreateOSLauncher extends JNLPLauncher {
@@ -163,8 +159,9 @@ public class CreateOSLauncher extends JNLPLauncher {
       apiClient.waitForRunning(sandboxId, Duration.ofMinutes(5));
       listener.getLogger().println("Sandbox is running.");
 
-      if (template.isSshLaunch()) {
-        launchSsh(computer, listener, slave, template, apiClient, sandboxId);
+      SshLaunchMethod sshLaunch = template.sshLauncher();
+      if (sshLaunch != null) {
+        launchSsh(computer, listener, slave, template, apiClient, sandboxId, sshLaunch);
       } else {
         launchInbound(createOSComputer, listener, slave, template, apiClient, sandboxId);
       }
@@ -290,28 +287,20 @@ public class CreateOSLauncher extends JNLPLauncher {
       CreateOSSlave slave,
       SandboxTemplate template,
       CreateOSApiClient apiClient,
-      String sandboxId)
+      String sandboxId,
+      SshLaunchMethod sshLaunch)
       throws Exception {
-    if (template.getSshCredentialsId() == null || template.getSshCredentialsId().isBlank()) {
-      throw new IllegalStateException("SSH launch requires SSH credentials");
-    }
-    if (template.getSshPublicKey() == null || template.getSshPublicKey().isBlank()) {
-      throw new IllegalStateException("SSH launch requires the matching SSH public key");
-    }
-
-    SSHUserPrivateKey credential = resolveSshCredential(template.getSshCredentialsId());
-    if (credential == null) {
-      throw new IllegalStateException(
-          "SSH credential not found: " + template.getSshCredentialsId());
-    }
+    SSHUserPrivateKey credential = sshLaunch.resolveCredential();
     String username = credential.getUsername();
     if (username == null || username.isBlank()) {
       throw new IllegalStateException(
-          "SSH credential requires a username: " + template.getSshCredentialsId());
+          "SSH credential requires a username: " + sshLaunch.getCredentialsId());
     }
 
     listener.getLogger().println("Preparing SSH access for user: " + username);
-    JsonNode prepare = apiClient.runBash(sandboxId, sshPrepareCommand(template, username));
+    JsonNode prepare =
+        apiClient.runBash(
+            sandboxId, sshPrepareCommand(template, username, sshLaunch.authorizedKey()));
     if (!checkExec(prepare, "SSH preparation", listener)) {
       slave.terminateBackingSandbox(listener);
       return;
@@ -328,7 +317,7 @@ public class CreateOSLauncher extends JNLPLauncher {
         new SSHLauncher(
             "127.0.0.1",
             proxy.getLocalPort(),
-            template.getSshCredentialsId(),
+            sshLaunch.getCredentialsId(),
             null,
             "java",
             null,
@@ -345,19 +334,13 @@ public class CreateOSLauncher extends JNLPLauncher {
     sshLauncher.launch(computer, listener);
   }
 
-  private static SSHUserPrivateKey resolveSshCredential(String credentialsId) {
-    return CredentialsMatchers.firstOrNull(
-        CredentialsProvider.lookupCredentialsInItemGroup(
-            SSHUserPrivateKey.class, Jenkins.get(), ACL.SYSTEM2),
-        CredentialsMatchers.withId(credentialsId));
+  static String sshPrepareCommand(SandboxTemplate template, String username, String authorizedKey) {
+    return sshPrepareCommand(template, username, authorizedKey, "/run/sshd");
   }
 
-  static String sshPrepareCommand(SandboxTemplate template, String username) {
-    return sshPrepareCommand(template, username, "/run/sshd");
-  }
-
-  static String sshPrepareCommand(SandboxTemplate template, String username, String sshdRunDir) {
-    String publicKey = shellQuote(template.getSshPublicKey().trim());
+  static String sshPrepareCommand(
+      SandboxTemplate template, String username, String authorizedKey, String sshdRunDir) {
+    String publicKey = shellQuote(authorizedKey.trim());
     String remoteFs = shellQuote(template.getRemoteFs());
     String runDir = shellQuote(sshdRunDir);
     String user = shellQuote(username);

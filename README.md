@@ -68,18 +68,20 @@ through the CreateOS tunnel API.
 
 ### SSH credentials
 
-SSH launch mode needs two matching pieces:
-
-- a Jenkins SSH private-key credential, selected by the template's **SSH Credentials** field
-- the matching public key, pasted into the template's **SSH Public Key** field
+SSH launch mode needs one thing: a Jenkins SSH private-key credential, selected by the
+template's **SSH Credentials** field.
 
 The private key, optional passphrase, and username stay in Jenkins Credentials. The public
-key is safe to inject into the sandbox and is written to that user's `authorized_keys`
-before `sshd` starts. The credential username must exist in the agent root filesystem; the
-template in `Dockerfile.agent` provides `jenkins` and `/home/jenkins`.
+key is derived from that credential and written to the user's `authorized_keys` before
+`sshd` starts, so there is no second field to keep in sync and no way to install a public
+key that does not match the private one the launcher authenticates with. The credential
+username must exist in the agent root filesystem; the template in `Dockerfile.agent`
+provides `jenkins` and `/home/jenkins`.
 
 For a passphrase-protected private key, store the passphrase in the Jenkins SSH credential.
-The sandbox never receives the passphrase.
+The sandbox never receives the passphrase. Both PEM and OpenSSH key containers work,
+encrypted or not, because the key is read with the same library that authenticates the
+launch.
 
 ## Pipeline Usage
 
@@ -218,7 +220,7 @@ through the CreateOS exec API, and the agent connects back to the controller ove
 HTTPS/WebSocket.
 
 For controllers that cannot accept inbound agent connections, choose **SSH over CreateOS
-tunnel**. The launcher creates the sandbox, injects the configured SSH public key, starts
+tunnel**. The launcher creates the sandbox, injects the credential's public key, starts
 `sshd`, opens a local loopback proxy on the controller, and connects Jenkins' SSH launcher
 to sandbox port 22 through the CreateOS tunnel API. The build still uses Jenkins Remoting,
 so Pipeline `sh`, logs, workspace operations, and artifact handling behave exactly as with a
@@ -235,7 +237,7 @@ SSH launch sequence:
 Jenkins controller
   → POST /v1/sandboxes
   → poll until sandbox is running
-  → exec: install public key into /home/jenkins/.ssh/authorized_keys
+  → exec: install the credential's public key into /home/jenkins/.ssh/authorized_keys
   → exec: start sshd
   → POST /v1/sandboxes/{id}/tunnel/22
   → open local loopback port on the controller

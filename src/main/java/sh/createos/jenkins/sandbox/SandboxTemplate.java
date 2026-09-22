@@ -1,24 +1,17 @@
 package sh.createos.jenkins.sandbox;
 
-import com.cloudbees.jenkins.plugins.sshcredentials.SSHUserPrivateKey;
-import com.cloudbees.plugins.credentials.CredentialsMatchers;
-import com.cloudbees.plugins.credentials.common.StandardListBoxModel;
 import hudson.Extension;
 import hudson.model.AbstractDescribableImpl;
 import hudson.model.Descriptor;
-import hudson.security.ACL;
 import hudson.util.FormValidation;
-import hudson.util.ListBoxModel;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import jenkins.model.Jenkins;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
-import org.kohsuke.stapler.verb.POST;
 
 /**
  * Configuration template for a CreateOS Sandbox agent.
@@ -32,8 +25,6 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
     implements Serializable {
 
   private static final long serialVersionUID = 1L;
-  static final String LAUNCH_METHOD_INBOUND = "inbound";
-  static final String LAUNCH_METHOD_SSH = "ssh";
 
   /** Jenkins label — jobs with `agent { label 'createos' }` match this. */
   private final String label;
@@ -54,14 +45,16 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
   private int diskMiB;
 
   /** Agent launch transport. Defaults to the existing inbound WebSocket behavior. */
-  private String launchMethod = LAUNCH_METHOD_INBOUND;
+  private CreateOSLaunchMethod launcher;
 
-  /** Jenkins SSH credential used when launchMethod is ssh. */
-  private String sshCredentialsId;
+  /** Transport name written by plugin versions before the launch method became describable. */
+  @Deprecated private transient String launchMethod;
 
-  /** Public key matching sshCredentialsId, injected into the sandbox before sshd starts. */
-  // lgtm[jenkins/plaintext-storage] An OpenSSH public key is intended to be shared.
-  private String sshPublicKey;
+  /** SSH credential written by plugin versions before the launch method became describable. */
+  @Deprecated private transient String sshCredentialsId;
+
+  /** Public key written by plugin versions that could not derive it from the credential. */
+  @Deprecated private transient String sshPublicKey;
 
   /** Whether Jenkinsfiles may override this template through the createos Declarative agent. */
   private Boolean allowPipelineOverrides;
@@ -119,35 +112,34 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
     this.diskMiB = diskMiB;
   }
 
-  public String getLaunchMethod() {
-    return launchMethod == null ? LAUNCH_METHOD_INBOUND : launchMethod;
+  public CreateOSLaunchMethod getLauncher() {
+    return launcher == null ? new InboundLaunchMethod() : launcher;
   }
 
   @DataBoundSetter
-  public void setLaunchMethod(String launchMethod) {
-    this.launchMethod = validateLaunchMethod(launchMethod);
+  public void setLauncher(CreateOSLaunchMethod launcher) {
+    this.launcher = launcher;
   }
 
-  boolean isSshLaunch() {
-    return LAUNCH_METHOD_SSH.equals(getLaunchMethod());
+  /** Returns the SSH transport, or null when this template launches inbound agents. */
+  SshLaunchMethod sshLauncher() {
+    return getLauncher() instanceof SshLaunchMethod ssh ? ssh : null;
   }
 
-  public String getSshCredentialsId() {
-    return sshCredentialsId;
-  }
-
-  @DataBoundSetter
-  public void setSshCredentialsId(String sshCredentialsId) {
-    this.sshCredentialsId = sshCredentialsId;
-  }
-
-  public String getSshPublicKey() {
-    return sshPublicKey;
-  }
-
-  @DataBoundSetter
-  public void setSshPublicKey(String sshPublicKey) {
-    this.sshPublicKey = sshPublicKey;
+  /**
+   * Migrates templates written before the launch method became describable.
+   *
+   * <p>The old form stored the transport as a string beside two SSH fields that were meaningless
+   * for inbound agents; the public key is now derived from the credential, so it is dropped.
+   */
+  protected Object readResolve() {
+    if (launcher == null) {
+      launcher =
+          "ssh".equals(launchMethod)
+              ? new SshLaunchMethod(sshCredentialsId)
+              : new InboundLaunchMethod();
+    }
+    return this;
   }
 
   public boolean isAllowPipelineOverrides() {
@@ -203,24 +195,11 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
     copy.setRemoteFs(remoteFs);
     copy.setRegion(region);
     copy.setDiskMiB(diskMiB);
-    copy.setLaunchMethod(getLaunchMethod());
-    copy.setSshCredentialsId(sshCredentialsId);
-    copy.setSshPublicKey(sshPublicKey);
+    copy.setLauncher(getLauncher());
     copy.setAllowPipelineOverrides(isAllowPipelineOverrides());
     copy.setNetworks(networks);
     copy.setDisks(new ArrayList<>(disks));
     return copy;
-  }
-
-  static String validateLaunchMethod(String launchMethod) {
-    if (launchMethod == null || launchMethod.isBlank()) {
-      return LAUNCH_METHOD_INBOUND;
-    }
-    String normalized = launchMethod.trim();
-    if (LAUNCH_METHOD_INBOUND.equals(normalized) || LAUNCH_METHOD_SSH.equals(normalized)) {
-      return normalized;
-    }
-    throw new IllegalArgumentException("Unsupported CreateOS launch method: " + launchMethod);
   }
 
   /** Exposes sandbox template metadata and validation to Jenkins. */
@@ -232,93 +211,10 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
       return "CreateOS Sandbox Template";
     }
 
-    /** Validates that a Jenkins label was provided. */
-    @POST
-    public FormValidation doCheckLabel(@QueryParameter String value) {
-      Jenkins.get().checkPermission(Jenkins.ADMINISTER);
-      if (value == null || value.isBlank()) {
-        return FormValidation.error("Label is required");
-      }
-      return FormValidation.ok();
-    }
-
-    /** Validates that a CreateOS sandbox shape was provided. */
-    @POST
-    public FormValidation doCheckShape(@QueryParameter String value) {
-      Jenkins.get().checkPermission(Jenkins.ADMINISTER);
-      if (value == null || value.isBlank()) {
-        return FormValidation.error("Shape is required (e.g. s-1vcpu-1gb)");
-      }
-      return FormValidation.ok();
-    }
-
-    /** Validates that a CreateOS root filesystem was provided. */
-    @POST
-    public FormValidation doCheckRootfs(@QueryParameter String value) {
-      Jenkins.get().checkPermission(Jenkins.ADMINISTER);
-      if (value == null || value.isBlank()) {
-        return FormValidation.error("Root filesystem is required (e.g. devbox:1)");
-      }
-      return FormValidation.ok();
-    }
-
     /** Validates the optional root disk size override. */
     public FormValidation doCheckDiskMiB(@QueryParameter int value) {
       if (value < 0) {
         return FormValidation.error("Disk size cannot be negative");
-      }
-      return FormValidation.ok();
-    }
-
-    /** Returns the supported agent launch transports. */
-    public ListBoxModel doFillLaunchMethodItems() {
-      ListBoxModel items = new ListBoxModel();
-      items.add("Inbound WebSocket", LAUNCH_METHOD_INBOUND);
-      items.add("SSH over CreateOS tunnel", LAUNCH_METHOD_SSH);
-      return items;
-    }
-
-    /** Validates that the launch method is one of the supported transports. */
-    @POST
-    public FormValidation doCheckLaunchMethod(@QueryParameter String value) {
-      Jenkins.get().checkPermission(Jenkins.ADMINISTER);
-      try {
-        validateLaunchMethod(value);
-        return FormValidation.ok();
-      } catch (IllegalArgumentException e) {
-        return FormValidation.error(e.getMessage());
-      }
-    }
-
-    /** Returns SSH credentials available to Jenkins administrators. */
-    @POST
-    public ListBoxModel doFillSshCredentialsIdItems(@QueryParameter String sshCredentialsId) {
-      if (!Jenkins.get().hasPermission(Jenkins.ADMINISTER)) {
-        return new StandardListBoxModel().includeCurrentValue(sshCredentialsId);
-      }
-      return new StandardListBoxModel()
-          .includeEmptyValue()
-          .includeCurrentValue(sshCredentialsId)
-          .includeMatchingAs(
-              ACL.SYSTEM2,
-              Jenkins.get(),
-              SSHUserPrivateKey.class,
-              Collections.emptyList(),
-              CredentialsMatchers.always());
-    }
-
-    /** Validates the optional public key used for SSH launch. */
-    @POST
-    public FormValidation doCheckSshPublicKey(@QueryParameter String value) {
-      Jenkins.get().checkPermission(Jenkins.ADMINISTER);
-      if (value == null || value.isBlank()) {
-        return FormValidation.ok();
-      }
-      String trimmed = value.trim();
-      if (!trimmed.startsWith("ssh-ed25519 ")
-          && !trimmed.startsWith("ssh-rsa ")
-          && !trimmed.startsWith("ecdsa-sha2-")) {
-        return FormValidation.error("Expected an OpenSSH public key");
       }
       return FormValidation.ok();
     }

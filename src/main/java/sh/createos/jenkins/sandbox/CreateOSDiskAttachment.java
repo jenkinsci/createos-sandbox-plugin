@@ -59,16 +59,6 @@ public class CreateOSDiskAttachment extends AbstractDescribableImpl<CreateOSDisk
       return "CreateOS Disk Attachment";
     }
 
-    /** Validates that a disk id or name was provided. */
-    @POST
-    public FormValidation doCheckId(@QueryParameter String value) {
-      Jenkins.get().checkPermission(Jenkins.ADMINISTER);
-      if (value == null || value.isBlank()) {
-        return FormValidation.error("Disk id or name is required");
-      }
-      return FormValidation.ok();
-    }
-
     /** Validates that the mount path is absolute. */
     @POST
     public FormValidation doCheckMountPath(@QueryParameter String value) {

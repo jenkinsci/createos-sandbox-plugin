@@ -107,10 +107,13 @@ class CreateOSLauncherTest {
         "#!/usr/bin/env bash\n" + "printf 'sshd-started' > " + tmp.resolve("sshd.log") + "\n");
     SandboxTemplate template = new SandboxTemplate("createos", "s-1vcpu-1gb", "devbox:1");
     template.setRemoteFs(tmp.resolve("workspace").toString());
-    template.setSshPublicKey("ssh-ed25519 AAAATEST createos");
 
     String command =
-        CreateOSLauncher.sshPrepareCommand(template, "builder", tmp.resolve("run-sshd").toString());
+        CreateOSLauncher.sshPrepareCommand(
+            template,
+            "builder",
+            "ssh-ed25519 AAAATEST createos",
+            tmp.resolve("run-sshd").toString());
     String out =
         runBash(
             command, Map.of("PATH", bin + System.getProperty("path.separator") + "/usr/bin:/bin"));

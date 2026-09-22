@@ -60,6 +60,11 @@
   </dependencyManagement>
 
   <dependencies>
+    <!-- Derives the sandbox authorized_keys entry from the configured SSH credential -->
+    <dependency>
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>bouncycastle-api</artifactId>
+    </dependency>
     <!-- Credentials plugin — stores API keys securely in Jenkins -->
     <dependency>
       <groupId>org.jenkins-ci.plugins</groupId>
@@ -88,11 +93,6 @@
     <dependency>
       <groupId>org.jenkins-ci.plugins</groupId>
       <artifactId>ssh-slaves</artifactId>
-    </dependency>
-    <!-- CreateOSDeclarativeAgent uses @Symbol directly. -->
-    <dependency>
-      <groupId>org.jenkins-ci.plugins</groupId>
-      <artifactId>structs</artifactId>
     </dependency>
     <dependency>
       <groupId>org.jenkins-ci.plugins.workflow</groupId>

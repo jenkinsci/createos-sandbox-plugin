@@ -13,5 +13,5 @@
   -->
   <suppress
       checks="AbbreviationAsWordInName|GoogleMethodName"
-      files="CreateOS(ApiClient|Cloud|Computer|DeclarativeAgent|DiskAttachment|DownloadStep|Launcher|PipelineSupport|QueueListener|SandboxContext|SandboxRequest|SandboxStep|ShStep|Slave|StepSupport|TemplateOverrides|TunnelProxy|UploadStep)(Test)?\.java" />
+      files="CreateOS(ApiClient|Cloud|Computer|DeclarativeAgent|DiskAttachment|DownloadStep|LaunchMethod|Launcher|PipelineSupport|QueueListener|SandboxContext|SandboxRequest|SandboxStep|ShStep|Slave|StepSupport|TemplateOverrides|TunnelProxy|UploadStep)(Test)?\.java" />
 </suppressions>
