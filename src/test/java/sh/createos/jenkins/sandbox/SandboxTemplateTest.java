@@ -1,6 +1,7 @@
 package sh.createos.jenkins.sandbox;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -93,5 +94,40 @@ class SandboxTemplateTest {
                 """);
 
     assertInstanceOf(InboundLaunchMethod.class, migrated.getLauncher());
+  }
+
+  /**
+   * A template saved before these settings existed must reconnect across restarts and use the
+   * default idle timeout, rather than read a missing field as 0 minutes and reap agents on sight.
+   */
+  @Test
+  @WithJenkins
+  void anOldTemplateReconnectsOnRestartWithTheDefaultIdleTimeout(JenkinsRule r) {
+    SandboxTemplate migrated =
+        (SandboxTemplate)
+            Jenkins.XSTREAM2.fromXML(
+                """
+                <sh.createos.jenkins.sandbox.SandboxTemplate>
+                  <label>createos</label>
+                  <shape>s-1vcpu-1gb</shape>
+                  <rootfs>devbox:1</rootfs>
+                </sh.createos.jenkins.sandbox.SandboxTemplate>
+                """);
+
+    assertEquals(SandboxTemplate.DEFAULT_IDLE_MINUTES, migrated.getIdleMinutes());
+    assertFalse(migrated.isDeleteOnRestart());
+  }
+
+  /** Declarative agents inherit these from the admin template; a Jenkinsfile cannot change them. */
+  @Test
+  void pipelineCopiesKeepTheRestartAndIdlePolicy() {
+    SandboxTemplate template = new SandboxTemplate("createos", "s-1vcpu-1gb", "devbox:1");
+    template.setIdleMinutes(7);
+    template.setDeleteOnRestart(true);
+
+    SandboxTemplate copy = template.copyForPipeline("generated", "s-2vcpu-2gb", "devbox:1");
+
+    assertEquals(7, copy.getIdleMinutes());
+    assertTrue(copy.isDeleteOnRestart());
   }
 }

@@ -49,6 +49,16 @@
         <f:textarea />
     </f:entry>
 
+    <f:entry title="Idle Timeout (minutes)" field="idleMinutes"
+             description="An agent that has not taken a build within this many minutes is deleted with its sandbox.">
+        <f:number default="1" min="1" />
+    </f:entry>
+
+    <f:entry field="deleteOnRestart"
+             description="By default a controller restart reconnects SSH agents and their builds resume. When enabled, a restart deletes this template's agents and sandboxes instead, and running builds fail. Inbound agents are always deleted on restart.">
+        <f:checkbox title="Delete agents on controller restart" />
+    </f:entry>
+
     <f:entry title="Disks">
         <f:repeatableProperty field="disks" />
     </f:entry>

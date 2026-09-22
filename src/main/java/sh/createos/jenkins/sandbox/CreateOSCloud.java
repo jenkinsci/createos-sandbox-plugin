@@ -67,6 +67,9 @@ public class CreateOSCloud extends Cloud {
    * sandbox kept its workspace, so a Pipeline that was mid-build can resume through Durable Task.
    * Only the tunnel died with the previous JVM, and relaunching rebuilds it.
    *
+   * <p>A template can opt out with "Delete agents on controller restart", for agents meant to be
+   * strictly one-process-lifetime; those are terminated like everything below.
+   *
    * <p>Everything else is terminated, as it always was. An inbound agent is not recovered here
    * because its agent process is reached over a WebSocket this plugin never re-establishes, and a
    * node whose sandbox has gone has nothing left to reconnect to.
@@ -96,9 +99,14 @@ public class CreateOSCloud extends Cloud {
     }
   }
 
-  /** Whether an agent from a previous controller process still has a sandbox to reconnect to. */
+  /**
+   * Whether an agent from a previous controller process should be reconnected: SSH, a sandbox that
+   * is still running, and a template that has not opted into deletion on restart.
+   */
   static boolean isRecoverable(CreateOSSlave node) {
-    if (!node.isSshLaunch() || node.getSandboxId() == null) {
+    if (!node.isSshLaunch()
+        || node.getSandboxId() == null
+        || node.getTemplate().isDeleteOnRestart()) {
       return false;
     }
     try {

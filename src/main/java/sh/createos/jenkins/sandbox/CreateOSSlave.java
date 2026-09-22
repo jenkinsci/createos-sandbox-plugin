@@ -44,9 +44,9 @@ public class CreateOSSlave extends AbstractCloudSlave {
     setMode(Node.Mode.EXCLUSIVE);
     setNumExecutors(1);
 
-    // OnceRetentionStrategy: agent accepts one build then terminates.
-    // Timeout of 5 minutes in case agent never gets a build assigned.
-    setRetentionStrategy(new OnceRetentionStrategy(5));
+    // OnceRetentionStrategy: agent accepts one build then terminates, and is reaped after the
+    // template's idle timeout if it never gets one.
+    setRetentionStrategy(new OnceRetentionStrategy(template.getIdleMinutes()));
   }
 
   @Override

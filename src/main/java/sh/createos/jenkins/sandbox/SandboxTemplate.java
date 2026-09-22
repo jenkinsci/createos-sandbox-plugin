@@ -65,6 +65,21 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
   /** S3 disk attachments to mount at sandbox creation. */
   private List<CreateOSDiskAttachment> disks = new ArrayList<>();
 
+  /**
+   * Minutes an agent may sit idle before its sandbox is deleted. Null in templates saved before the
+   * field existed, which read as {@link #DEFAULT_IDLE_MINUTES}.
+   */
+  private Integer idleMinutes;
+
+  /**
+   * Whether a controller restart deletes this template's agents instead of reconnecting them. Off
+   * by default: a restart would otherwise re-run every in-flight build from scratch, on fresh
+   * sandboxes billed a second time.
+   */
+  private boolean deleteOnRestart;
+
+  static final int DEFAULT_IDLE_MINUTES = 1;
+
   /** Creates a sandbox template with its required Jenkins label, shape, and root filesystem. */
   @DataBoundConstructor
   public SandboxTemplate(String label, String shape, String rootfs) {
@@ -190,6 +205,24 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
     this.disks = disks != null ? disks : new ArrayList<>();
   }
 
+  public int getIdleMinutes() {
+    return idleMinutes == null || idleMinutes < 1 ? DEFAULT_IDLE_MINUTES : idleMinutes;
+  }
+
+  @DataBoundSetter
+  public void setIdleMinutes(int idleMinutes) {
+    this.idleMinutes = idleMinutes;
+  }
+
+  public boolean isDeleteOnRestart() {
+    return deleteOnRestart;
+  }
+
+  @DataBoundSetter
+  public void setDeleteOnRestart(boolean deleteOnRestart) {
+    this.deleteOnRestart = deleteOnRestart;
+  }
+
   SandboxTemplate copyForPipeline(String label, String shape, String rootfs) {
     SandboxTemplate copy = new SandboxTemplate(label, shape, rootfs);
     copy.setRemoteFs(remoteFs);
@@ -199,6 +232,8 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
     copy.setAllowPipelineOverrides(isAllowPipelineOverrides());
     copy.setNetworks(networks);
     copy.setDisks(new ArrayList<>(disks));
+    copy.setIdleMinutes(getIdleMinutes());
+    copy.setDeleteOnRestart(deleteOnRestart);
     return copy;
   }
 
@@ -215,6 +250,14 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
     public FormValidation doCheckDiskMiB(@QueryParameter int value) {
       if (value < 0) {
         return FormValidation.error("Disk size cannot be negative");
+      }
+      return FormValidation.ok();
+    }
+
+    /** Rejects an idle timeout that would delete an agent before it could take a build. */
+    public FormValidation doCheckIdleMinutes(@QueryParameter int value) {
+      if (value < 1) {
+        return FormValidation.error("Idle timeout must be at least 1 minute");
       }
       return FormValidation.ok();
     }

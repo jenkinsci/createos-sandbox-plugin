@@ -107,6 +107,16 @@ class CreateOSRecoveryTest {
     assertFalse(CreateOSLauncher.adoptsExistingSandbox(slave, cloudOf(slave).buildApiClient()));
   }
 
+  /** The opt-out: a template that asks for deletion on restart is not reconnected. */
+  @Test
+  void anSshAgentWhoseTemplateDeletesOnRestartIsNotRecovered(JenkinsRule r) throws Exception {
+    SandboxTemplate template = sshTemplate();
+    template.setDeleteOnRestart(true);
+    CreateOSSlave slave = agent(r, template, "sb-alive");
+
+    assertFalse(CreateOSCloud.isRecoverable(slave));
+  }
+
   // --- helpers -------------------------------------------------------------
 
   private static SandboxTemplate sshTemplate() {

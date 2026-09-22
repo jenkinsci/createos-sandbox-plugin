@@ -46,6 +46,11 @@ pipeline, so versions look like `3.v1a2b3c4d5e6f` rather than `1.2.3`.
    - **Private Networks**: optional CreateOS network ids or names, comma- or
      newline-separated
    - **Disks**: optional S3 disk mounts, each with `id`, `mountPath`, and optional `subPath`
+   - **Idle Timeout (minutes)**: how long an agent that has not taken a build is kept before
+     it is deleted with its sandbox (default 1)
+   - **Delete agents on controller restart**: off by default, so a restart reconnects SSH
+     agents and their builds resume. Enable it for agents that must never outlive the
+     controller process; a restart then deletes them and running builds fail.
 
 Network and disk references are validated before the sandbox is created. A missing network
 or disk fails the launch with a clear message in the Jenkins log instead of producing a
@@ -468,7 +473,8 @@ workspace semantics for lower latency, and requiring explicit upload and downloa
    deletes the sandbox.
 5. **Controller restart interrupts inbound builds.** An SSH agent is reconnected to its
    surviving sandbox on startup and its build resumes, because the sandbox keeps the workspace
-   and only the tunnel dies with the controller process. An inbound (WebSocket) agent cannot be
+   and only the tunnel dies with the controller process — unless its template enables
+   **Delete agents on controller restart**. An inbound (WebSocket) agent cannot be
    reconnected — the plugin never re-establishes that socket — so it is terminated with its
    sandbox. Archive required outputs before restarting a controller running inbound agents.
    A periodic sweep destroys sandboxes this controller named but no longer has an agent for, so
