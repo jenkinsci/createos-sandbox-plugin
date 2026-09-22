@@ -18,6 +18,8 @@ public class CreateOSSlave extends AbstractCloudSlave {
   private static final long serialVersionUID = 1L;
   private static final Logger LOGGER = Logger.getLogger(CreateOSSlave.class.getName());
 
+  private static final String SANDBOX_NAME_PREFIX = "jenkins-";
+
   private volatile String sandboxId;
   private final SandboxTemplate template;
   private final String cloudName;
@@ -94,6 +96,36 @@ public class CreateOSSlave extends AbstractCloudSlave {
 
   public String getSandboxId() {
     return sandboxId;
+  }
+
+  /** Whether this agent is reached over SSH rather than an inbound WebSocket. */
+  boolean isSshLaunch() {
+    return template.sshLauncher() != null;
+  }
+
+  /**
+   * Names the sandbox after both the agent and this controller.
+   *
+   * <p>The controller half matters when several Jenkins instances share one CreateOS account: the
+   * orphan sweep destroys sandboxes whose agent is gone, and without it one controller would reap
+   * another's running agents.
+   */
+  static String sandboxName(String agentName) {
+    return sandboxNamePrefix() + agentName;
+  }
+
+  /** The prefix every sandbox created by this controller carries. */
+  static String sandboxNamePrefix() {
+    String instanceId = Jenkins.get().getLegacyInstanceId();
+    return SANDBOX_NAME_PREFIX + instanceId.substring(0, Math.min(8, instanceId.length())) + "-";
+  }
+
+  /** Recovers the agent name from a sandbox this controller named, or null if it did not. */
+  static String agentNameOf(String sandboxName) {
+    String prefix = sandboxNamePrefix();
+    return sandboxName != null && sandboxName.startsWith(prefix)
+        ? sandboxName.substring(prefix.length())
+        : null;
   }
 
   public void setSandboxId(String sandboxId) {

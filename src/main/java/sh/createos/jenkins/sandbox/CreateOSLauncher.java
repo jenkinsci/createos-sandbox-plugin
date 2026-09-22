@@ -146,18 +146,31 @@ public class CreateOSLauncher extends JNLPLauncher {
         listener.getLogger().println("Disk attachments: " + template.getDisks().size());
       }
 
-      // Step 1: Create sandbox
-      CreateOSSandboxRequest request = CreateOSSandboxRequest.fromTemplate(template);
-      listener.getLogger().println("Validating CreateOS disks and networks...");
-      listener.getLogger().println("Creating sandbox...");
-      String sandboxId = apiClient.createSandbox(request);
-      slave.setSandboxId(sandboxId);
-      listener.getLogger().println("Sandbox created: " + sandboxId);
+      // Step 1: Create the sandbox, or adopt the one this agent already owns.
+      //
+      // An SSH agent whose controller restarted still has its sandbox: the node records the id,
+      // the sandbox kept running, and its workspace and authorized_keys survived. Only the
+      // tunnel died, and that is rebuilt below. Creating a second sandbox here would strand the
+      // first one and throw away the workspace a build may still be resuming into.
+      String sandboxId;
+      if (adoptsExistingSandbox(slave, apiClient)) {
+        sandboxId = slave.getSandboxId();
+        listener.getLogger().println("Reconnecting to existing sandbox: " + sandboxId);
+      } else {
+        CreateOSSandboxRequest request =
+            CreateOSSandboxRequest.fromTemplate(
+                template, CreateOSSlave.sandboxName(slave.getNodeName()));
+        listener.getLogger().println("Validating CreateOS disks and networks...");
+        listener.getLogger().println("Creating sandbox...");
+        sandboxId = apiClient.createSandbox(request);
+        slave.setSandboxId(sandboxId);
+        listener.getLogger().println("Sandbox created: " + sandboxId);
 
-      // Step 2: Wait for running
-      listener.getLogger().println("Waiting for sandbox to be ready...");
-      apiClient.waitForRunning(sandboxId, Duration.ofMinutes(5));
-      listener.getLogger().println("Sandbox is running.");
+        // Step 2: Wait for running
+        listener.getLogger().println("Waiting for sandbox to be ready...");
+        apiClient.waitForRunning(sandboxId, Duration.ofMinutes(5));
+        listener.getLogger().println("Sandbox is running.");
+      }
 
       SshLaunchMethod sshLaunch = template.sshLauncher();
       if (sshLaunch != null) {
@@ -373,5 +386,17 @@ public class CreateOSLauncher extends JNLPLauncher {
         + " chmod 600 \"$home/.ssh/authorized_keys\";"
         + " ssh-keygen -A >/dev/null 2>&1 || true;"
         + " pgrep -x sshd >/dev/null || \"$sshd_path\"";
+  }
+
+  /**
+   * Whether this agent already owns a sandbox worth reconnecting to rather than replacing.
+   *
+   * <p>Separated from {@link #launch} so the decision can be tested without a tunnel or an SSH
+   * handshake: getting it wrong either strands a billed sandbox or throws away the workspace a
+   * build is resuming into.
+   */
+  static boolean adoptsExistingSandbox(CreateOSSlave slave, CreateOSApiClient apiClient) {
+    String sandboxId = slave.getSandboxId();
+    return slave.isSshLaunch() && sandboxId != null && apiClient.isRunning(sandboxId);
   }
 }

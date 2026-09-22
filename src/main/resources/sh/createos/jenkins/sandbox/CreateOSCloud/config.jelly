@@ -10,6 +10,15 @@
          xmlns:f="/lib/form"
          xmlns:c="/lib/credentials">
 
+    <!--
+        The cloud identifier is set on the "add a new cloud" page, not here, but it still has to
+        round-trip through this form: without it a newly created cloud has no name to save under
+        and the first save fails.
+    -->
+    <f:invisibleEntry>
+        <f:textbox field="name" />
+    </f:invisibleEntry>
+
     <f:entry title="Display Name" field="displayName"
              description="Optional name shown in Manage Jenkins > Clouds. The cloud identifier cannot be changed here.">
         <f:textbox />
@@ -39,6 +48,6 @@
         <f:repeatableProperty field="templates" header="Template" />
     </f:entry>
 
-    <f:entry description="Controller restarts terminate CreateOS agents and destroy their sandboxes. Running builds on these agents are interrupted; archive needed output before restarting." />
+    <f:entry description="A controller restart reconnects SSH agents to their surviving sandboxes, so a build resumes where it left off. Inbound (WebSocket) agents cannot be reconnected and are terminated with their sandboxes; archive needed output before restarting one." />
 
 </j:jelly>

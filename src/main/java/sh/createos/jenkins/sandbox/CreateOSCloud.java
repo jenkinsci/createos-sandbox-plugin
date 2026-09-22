@@ -4,17 +4,18 @@ import com.cloudbees.plugins.credentials.CredentialsMatchers;
 import com.cloudbees.plugins.credentials.CredentialsProvider;
 import com.cloudbees.plugins.credentials.common.StandardListBoxModel;
 import hudson.Extension;
-import hudson.init.InitMilestone;
-import hudson.init.Initializer;
 import hudson.model.Computer;
 import hudson.model.Descriptor;
 import hudson.model.Label;
 import hudson.model.Node;
+import hudson.model.listeners.ItemListener;
 import hudson.security.ACL;
 import hudson.slaves.Cloud;
 import hudson.slaves.NodeProvisioner.PlannedNode;
+import hudson.slaves.SlaveComputer;
 import hudson.util.FormValidation;
 import hudson.util.ListBoxModel;
+import hudson.util.LogTaskListener;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -28,18 +29,19 @@ import java.util.logging.Logger;
 import java.util.stream.Stream;
 import jenkins.model.Jenkins;
 import jenkins.util.Timer;
-import net.sf.json.JSONObject;
 import org.jenkinsci.plugins.plaincredentials.StringCredentials;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
-import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.verb.POST;
 
 /** Jenkins cloud implementation that provisions ephemeral CreateOS sandbox agents. */
 public class CreateOSCloud extends Cloud {
 
   private static final Logger LOGGER = Logger.getLogger(CreateOSCloud.class.getName());
+
+  /** How long a recovered agent has to come back online before its sandbox is reclaimed. */
+  private static final long RECONNECT_DEADLINE_MINUTES = 10;
 
   private String apiUrl;
   private String displayName;
@@ -59,29 +61,93 @@ public class CreateOSCloud extends Cloud {
     this.templates = new ArrayList<>();
   }
 
-  @Override
-  public Cloud reconfigure(StaplerRequest2 request, JSONObject form)
-      throws Descriptor.FormException {
-    if (form != null) {
-      form.put("name", name);
-    }
-    return super.reconfigure(request, form);
-  }
-
-  /** Terminates CreateOS agents restored from an earlier controller process. */
-  @Initializer(after = InitMilestone.SYSTEM_CONFIG_ADAPTED, before = InitMilestone.JOB_LOADED)
-  public static void cleanupStaleAgents() {
-    List<CreateOSSlave> toRemove = agents().map(CreateOSSlave.class::cast).toList();
-    for (CreateOSSlave node : toRemove) {
-      try {
-        LOGGER.fine("Terminating stale agent: " + node.getNodeName());
-        node.terminate();
-      } catch (Exception e) {
-        LOGGER.log(Level.WARNING, "Failed to terminate stale agent", e);
+  /**
+   * Decides what to do with each CreateOS agent restored from an earlier controller process.
+   *
+   * <p>An SSH agent whose sandbox is still running is reconnected rather than destroyed: the
+   * sandbox kept its workspace, so a Pipeline that was mid-build can resume through Durable Task.
+   * Only the tunnel died with the previous JVM, and relaunching rebuilds it.
+   *
+   * <p>Everything else is terminated, as it always was. An inbound agent is not recovered here
+   * because its agent process is reached over a WebSocket this plugin never re-establishes, and a
+   * node whose sandbox has gone has nothing left to reconnect to.
+   *
+   * <p>Driven from {@link ItemListener#onLoaded()} rather than an {@code @Initializer}: the work
+   * needs {@link Computer} objects, which exist only once startup is finished, and
+   * {@code @Initializer(after = COMPLETED)} can never run because that milestone is terminal —
+   * scheduling against it wedges the initialization graph instead (JENKINS-37759).
+   */
+  public static void recoverStaleAgents() {
+    for (CreateOSSlave node : agents().map(CreateOSSlave.class::cast).toList()) {
+      if (isRecoverable(node)) {
+        reconnect(node);
+      } else {
+        terminateQuietly(node);
       }
     }
-    if (!toRemove.isEmpty()) {
-      LOGGER.fine("Cleaned up " + toRemove.size() + " stale agent(s)");
+  }
+
+  /** Runs {@link #recoverStaleAgents()} once Jenkins has finished starting. */
+  @Extension
+  public static class AgentRecovery extends ItemListener {
+
+    @Override
+    public void onLoaded() {
+      recoverStaleAgents();
+    }
+  }
+
+  /** Whether an agent from a previous controller process still has a sandbox to reconnect to. */
+  static boolean isRecoverable(CreateOSSlave node) {
+    if (!node.isSshLaunch() || node.getSandboxId() == null) {
+      return false;
+    }
+    try {
+      CreateOSCloud cloud = node.getCreateOSCloud();
+      return cloud != null && cloud.buildApiClient().isRunning(node.getSandboxId());
+    } catch (Exception e) {
+      LOGGER.log(Level.FINE, "Could not check sandbox for " + node.getNodeName(), e);
+      return false;
+    }
+  }
+
+  private static void reconnect(CreateOSSlave node) {
+    Computer computer = node.toComputer();
+    if (!(computer instanceof SlaveComputer slaveComputer)) {
+      terminateQuietly(node);
+      return;
+    }
+    LOGGER.info("Reconnecting CreateOS agent to its surviving sandbox: " + node.getNodeName());
+    Computer.threadPoolForRemoting.submit(
+        () -> {
+          try {
+            node.getLauncher().launch(slaveComputer, new LogTaskListener(LOGGER, Level.INFO));
+          } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Failed to reconnect " + node.getNodeName(), e);
+          }
+        });
+
+    // A reconnection that never completes would hold a sandbox open indefinitely, so the
+    // agent gets a deadline rather than the benefit of the doubt.
+    Timer.get()
+        .schedule(
+            () -> {
+              if (slaveComputer.isOffline()) {
+                LOGGER.warning(
+                    "CreateOS agent did not come back online, terminating: " + node.getNodeName());
+                terminateQuietly(node);
+              }
+            },
+            RECONNECT_DEADLINE_MINUTES,
+            TimeUnit.MINUTES);
+  }
+
+  private static void terminateQuietly(CreateOSSlave node) {
+    try {
+      LOGGER.fine("Terminating stale agent: " + node.getNodeName());
+      node.terminate();
+    } catch (Exception e) {
+      LOGGER.log(Level.WARNING, "Failed to terminate stale agent", e);
     }
   }
 
@@ -229,6 +295,11 @@ public class CreateOSCloud extends Cloud {
   private int countPendingAgents() {
     getPendingAgentNames().removeAll(ownedAgents().map(Node::getNodeName).toList());
     return getPendingAgentNames().size();
+  }
+
+  /** Agents planned but not yet added as nodes, which own no sandbox the sweep may reclaim. */
+  Set<String> pendingAgentNames() {
+    return getPendingAgentNames();
   }
 
   private Set<String> getPendingAgentNames() {

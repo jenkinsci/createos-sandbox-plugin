@@ -2,6 +2,7 @@ package sh.createos.jenkins.sandbox;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -17,6 +18,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -205,5 +207,20 @@ class CreateOSCloudTest {
 
     assertEquals("s-1vcpu-1gb", request.shape());
     assertEquals("devbox:1", request.rootfs());
+  }
+
+  /**
+   * The cloud identifier is set on the "add a new cloud" page, not on this form, so the form has to
+   * carry it back or the first save drops the name and fails.
+   */
+  @Test
+  void savingTheConfigFormKeepsTheCloudName(JenkinsRule r) throws Exception {
+    CreateOSCloud cloud = cloudWithTemplate("createos");
+    r.jenkins.clouds.add(cloud);
+
+    HtmlPage page = r.createWebClient().goTo("manage/cloud/createos/configure");
+    r.submit(page.getFormByName("config"));
+
+    assertNotNull(r.jenkins.clouds.getByName("createos"), "cloud lost its name on save");
   }
 }

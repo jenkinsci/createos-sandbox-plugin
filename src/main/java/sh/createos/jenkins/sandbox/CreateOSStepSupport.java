@@ -67,7 +67,10 @@ final class CreateOSStepSupport {
             ? inherited == null ? List.of() : inherited.getDisks()
             : step.getDisks();
 
-    return new CreateOSSandboxRequest(shape, rootfs, region, diskMiB, networks, disks);
+    // Deliberately unnamed: an exec-mode sandbox backs a pipeline block, not an agent, so it has
+    // no node for CreateOSSandboxSweep to match it against. Naming it the way agent sandboxes are
+    // named would make it look orphaned and get it destroyed underneath a running build.
+    return new CreateOSSandboxRequest(null, shape, rootfs, region, diskMiB, networks, disks);
   }
 
   static boolean hasTemplateOverrides(CreateOSTemplateOverrides overrides) {

@@ -466,8 +466,13 @@ workspace semantics for lower latency, and requiring explicit upload and downloa
 4. **SSH recovery is limited by the disposable lifecycle.** Jenkins may reconnect a dropped
    SSH agent connection, but once the node is terminated the plugin closes the tunnel and
    deletes the sandbox.
-5. **Controller restart interrupts disposable builds.** Startup cleanup destroys stale
-   CreateOS agents and their workspaces. Archive required outputs before the build ends.
+5. **Controller restart interrupts inbound builds.** An SSH agent is reconnected to its
+   surviving sandbox on startup and its build resumes, because the sandbox keeps the workspace
+   and only the tunnel dies with the controller process. An inbound (WebSocket) agent cannot be
+   reconnected — the plugin never re-establishes that socket — so it is terminated with its
+   sandbox. Archive required outputs before restarting a controller running inbound agents.
+   A periodic sweep destroys sandboxes this controller named but no longer has an agent for, so
+   a node lost while the controller was down cannot leave a sandbox billing indefinitely.
 
 ## Building from source
 

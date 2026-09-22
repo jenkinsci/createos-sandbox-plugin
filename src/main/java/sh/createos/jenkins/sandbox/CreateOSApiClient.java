@@ -17,6 +17,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Logger;
 
 /**
@@ -67,6 +69,10 @@ public class CreateOSApiClient {
     ObjectNode body = MAPPER.createObjectNode();
     body.put("shape", request.shape());
     body.put("rootfs", request.rootfs());
+
+    if (request.name() != null && !request.name().isBlank()) {
+      body.put("name", request.name());
+    }
 
     if (request.region() != null && !request.region().isBlank()) {
       body.put("region", request.region().trim());
@@ -169,6 +175,39 @@ public class CreateOSApiClient {
   public String getSandboxStatus(String sandboxId) throws IOException {
     return get("/v1/sandboxes/" + sandboxId).get("status").asText();
   }
+
+  /**
+   * Reports whether a sandbox is still running.
+   *
+   * <p>Any failure to answer counts as "not running". This backs decisions about adopting a sandbox
+   * the controller believes it owns, and treating an unreachable or deleted sandbox as alive would
+   * attach an agent to nothing.
+   */
+  public boolean isRunning(String sandboxId) {
+    try {
+      return "running".equals(getSandboxStatus(sandboxId));
+    } catch (IOException e) {
+      LOGGER.fine("Could not read status of sandbox " + sandboxId + ": " + e.getMessage());
+      return false;
+    }
+  }
+
+  /** Lists every sandbox visible to this API key. */
+  public List<SandboxSummary> listSandboxes() throws IOException {
+    JsonNode data = get("/v1/sandboxes");
+    List<SandboxSummary> sandboxes = new ArrayList<>();
+    for (JsonNode node : data.isArray() ? data : MAPPER.createArrayNode()) {
+      sandboxes.add(
+          new SandboxSummary(
+              node.path("id").asText(),
+              node.path("name").asText(""),
+              node.path("status").asText("")));
+    }
+    return sandboxes;
+  }
+
+  /** Identity of one sandbox as the list endpoint reports it. */
+  public record SandboxSummary(String id, String name, String status) {}
 
   /**
    * Run a bash script inside a sandbox and return once it exits.
