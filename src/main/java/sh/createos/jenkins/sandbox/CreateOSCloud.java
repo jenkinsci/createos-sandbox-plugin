@@ -135,7 +135,7 @@ public class CreateOSCloud extends Cloud {
       terminateQuietly(node);
       return;
     }
-    LOGGER.info("Keeping CreateOS agent with a surviving sandbox: " + node.getNodeName());
+    LOGGER.fine("Keeping CreateOS agent with a surviving sandbox: " + node.getNodeName());
 
     // A reconnection that never completes would hold a sandbox open indefinitely, so the
     // agent gets a deadline rather than the benefit of the doubt.

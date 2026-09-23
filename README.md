@@ -433,10 +433,11 @@ node('createos') {
 }
 ```
 
-Because this plugin deliberately terminates stale CreateOS agents during Jenkins startup, a
-shell running in one of those disposable agents cannot resume across a restart. The durable
-monitoring protocol still applies to every `sh`, but its restart-recovery benefit is limited
-for this lifecycle.
+This is what lets a build survive a controller restart. An SSH agent is reconnected to its
+surviving sandbox on startup, and a running `sh` resumes where it left off. That does not apply
+to inbound agents, or to templates with **Delete agents on controller restart** enabled: both
+are deleted on startup, and their running `sh` steps cannot resume (see
+[Known Limitations](#known-limitations)).
 
 ### Launch Method Timing
 
