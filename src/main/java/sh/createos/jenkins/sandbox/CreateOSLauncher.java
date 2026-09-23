@@ -146,12 +146,14 @@ public class CreateOSLauncher extends JNLPLauncher {
         listener.getLogger().println("Disk attachments: " + template.getDisks().size());
       }
 
-      // Step 1: Create the sandbox, or adopt the one this agent already owns.
-      //
-      // An SSH agent whose controller restarted still has its sandbox: the node records the id,
-      // the sandbox kept running, and its workspace and authorized_keys survived. Only the
-      // tunnel died, and that is rebuilt below. Creating a second sandbox here would strand the
-      // first one and throw away the workspace a build may still be resuming into.
+      /*
+       * Step 1: Create the sandbox, or adopt the one this agent already owns.
+       *
+       * An SSH agent whose controller restarted still has its sandbox: the node records the id,
+       * the sandbox kept running, and its workspace and authorized_keys survived. Only the
+       * tunnel died, and that is rebuilt below. Creating a second sandbox here would strand the
+       * first one and throw away the workspace a build may still be resuming into.
+       */
       String sandboxId;
       if (adoptsExistingSandbox(slave, apiClient)) {
         sandboxId = slave.getSandboxId();
@@ -212,19 +214,21 @@ public class CreateOSLauncher extends JNLPLauncher {
     listener.getLogger().println("Jenkins URL: " + jenkinsUrl);
 
     listener.getLogger().println("Preparing agent.jar...");
-    // The java check belongs here rather than after launch: a rootfs without a JVM
-    // otherwise fails inside the backgrounded nohup, where nothing reads the exit
-    // code and the only symptom is a 120s timeout with no cause. See Dockerfile.agent.
-    //
-    // Prefer the jar baked into the rootfs. It is pinned and checksummed at build
-    // time, so what runs is fixed by the image rather than by whatever the controller
-    // serves at launch, and nothing is fetched on the agent's hot path. Jenkins accepts
-    // any remoting at or above its published minimum, so one pinned jar serves every
-    // supported controller — see the compatibility table in README.md.
-    //
-    // The curl stays as a fallback so a rootfs built before the jar was baked still
-    // works. It is not dead code: `rootfs` is user-configurable and older templates
-    // remain valid.
+    /*
+     * The java check belongs here rather than after launch: a rootfs without a JVM
+     * otherwise fails inside the backgrounded nohup, where nothing reads the exit
+     * code and the only symptom is a 120s timeout with no cause. See Dockerfile.agent.
+     *
+     * Prefer the jar baked into the rootfs. It is pinned and checksummed at build
+     * time, so what runs is fixed by the image rather than by whatever the controller
+     * serves at launch, and nothing is fetched on the agent's hot path. Jenkins accepts
+     * any remoting at or above its published minimum, so one pinned jar serves every
+     * supported controller — see the compatibility table in README.md.
+     *
+     * The curl stays as a fallback so a rootfs built before the jar was baked still
+     * works. It is not dead code: `rootfs` is user-configurable and older templates
+     * remain valid.
+     */
     String remoteFs = shellQuote(template.getRemoteFs());
     JsonNode prepare =
         apiClient.runBash(

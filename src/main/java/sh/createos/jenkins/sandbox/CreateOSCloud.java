@@ -203,14 +203,16 @@ public class CreateOSCloud extends Cloud {
                   LOGGER.fine("Provisioning CreateOS sandbox agent: " + agentName);
                   Node node = new CreateOSSlave(agentName, template, this);
 
-                  // NodeProvisioner does not wake when a PlannedNode future completes.
-                  // Defer the review so its current update can first record this future.
-                  //
-                  // Skipped entirely for a null label, which is what `agent any` produces:
-                  // there is no per-label provisioner to nudge, and dereferencing it here
-                  // threw an NPE inside this future. Losing the hint only means unlabelled
-                  // work waits for the provisioner's next ordinary cycle instead of being
-                  // woken early — slower, never stuck.
+                  /*
+                   * NodeProvisioner does not wake when a PlannedNode future completes.
+                   * Defer the review so its current update can first record this future.
+                   *
+                   * Skipped entirely for a null label, which is what `agent any` produces:
+                   * there is no per-label provisioner to nudge, and dereferencing it here
+                   * threw an NPE inside this future. Losing the hint only means unlabelled
+                   * work waits for the provisioner's next ordinary cycle instead of being
+                   * woken early — slower, never stuck.
+                   */
                   if (label != null) {
                     Timer.get()
                         .schedule(
