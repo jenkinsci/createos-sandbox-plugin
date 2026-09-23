@@ -95,16 +95,18 @@ class CreateOSRecoveryTest {
   }
 
   /**
-   * Inbound agents are terminated even with a live sandbox: the plugin never re-establishes the
-   * WebSocket the agent process is reached over, so the sandbox would be unusable and still billed.
+   * An inbound agent with a live sandbox is kept too: its agent process reconnects the WebSocket by
+   * itself once the controller is back. The launcher must adopt that sandbox rather than create a
+   * second one — on a live controller the duplicate name was rejected, and the failure path then
+   * destroyed the running original.
    */
   @Test
-  void anInboundAgentIsNotRecoveredEvenWithALiveSandbox(JenkinsRule r) throws Exception {
+  void anInboundAgentWithALiveSandboxIsRecovered(JenkinsRule r) throws Exception {
     CreateOSSlave slave =
         agent(r, new SandboxTemplate("createos", "s-1vcpu-1gb", "devbox:1"), "sb-alive");
 
-    assertFalse(CreateOSCloud.isRecoverable(slave));
-    assertFalse(CreateOSLauncher.adoptsExistingSandbox(slave, cloudOf(slave).buildApiClient()));
+    assertTrue(CreateOSCloud.isRecoverable(slave));
+    assertTrue(CreateOSLauncher.adoptsExistingSandbox(slave, cloudOf(slave).buildApiClient()));
   }
 
   /** The opt-out: a template that asks for deletion on restart is not reconnected. */

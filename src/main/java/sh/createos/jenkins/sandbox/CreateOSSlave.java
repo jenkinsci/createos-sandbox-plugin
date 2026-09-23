@@ -106,11 +106,6 @@ public class CreateOSSlave extends AbstractCloudSlave {
     return sandboxId;
   }
 
-  /** Whether this agent is reached over SSH rather than an inbound WebSocket. */
-  boolean isSshLaunch() {
-    return template.sshLauncher() != null;
-  }
-
   /**
    * Names the sandbox so this controller can recognise it later.
    *

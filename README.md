@@ -48,7 +48,7 @@ pipeline, so versions look like `3.v1a2b3c4d5e6f` rather than `1.2.3`.
    - **Disks**: optional S3 disk mounts, each with `id`, `mountPath`, and optional `subPath`
    - **Idle Timeout (minutes)**: how long an agent that has not taken a build is kept before
      it is deleted with its sandbox (default 1)
-   - **Delete agents on controller restart**: off by default, so a restart reconnects SSH
+   - **Delete agents on controller restart**: off by default, so a restart reconnects
      agents and their builds resume. Enable it for agents that must never outlive the
      controller process; a restart then deletes them and running builds fail.
 
@@ -433,11 +433,11 @@ node('createos') {
 }
 ```
 
-This is what lets a build survive a controller restart. An SSH agent is reconnected to its
-surviving sandbox on startup, and a running `sh` resumes where it left off. That does not apply
-to inbound agents, or to templates with **Delete agents on controller restart** enabled: both
-are deleted on startup, and their running `sh` steps cannot resume (see
-[Known Limitations](#known-limitations)).
+This is what lets a build survive a controller restart. The agent's sandbox keeps running
+while the controller is down, the agent reconnects once it is back, and a running `sh` resumes
+where it left off, for both inbound and SSH agents. Templates with **Delete agents on controller
+restart** enabled are the exception: their agents are deleted on startup, and running `sh` steps
+cannot resume.
 
 ### Launch Method Timing
 
@@ -472,14 +472,13 @@ workspace semantics for lower latency, and requiring explicit upload and downloa
 4. **SSH recovery is limited by the disposable lifecycle.** Jenkins may reconnect a dropped
    SSH agent connection, but once the node is terminated the plugin closes the tunnel and
    deletes the sandbox.
-5. **Controller restart interrupts inbound builds.** An SSH agent is reconnected to its
-   surviving sandbox on startup and its build resumes, because the sandbox keeps the workspace
-   and only the tunnel dies with the controller process — unless its template enables
-   **Delete agents on controller restart**. An inbound (WebSocket) agent cannot be
-   reconnected — the plugin never re-establishes that socket — so it is terminated with its
-   sandbox. Archive required outputs before restarting a controller running inbound agents.
-   A periodic sweep destroys sandboxes this controller named but no longer has an agent for, so
-   a node lost while the controller was down cannot leave a sandbox billing indefinitely.
+5. **Sandboxes keep running, and billing, while the controller is down.** That is what lets
+   agents reconnect and builds resume after a restart. Templates with **Delete agents on
+   controller restart** enabled are deleted on startup instead. A periodic sweep destroys
+   sandboxes this controller named but no longer has an agent for, so a node lost while the
+   controller was down cannot leave a sandbox billing indefinitely. The sweep runs in the
+   controller, though: a controller that is deleted outright while its agents are running
+   leaves their sandboxes behind, to be removed from CreateOS by hand.
 
 ## Building from source
 

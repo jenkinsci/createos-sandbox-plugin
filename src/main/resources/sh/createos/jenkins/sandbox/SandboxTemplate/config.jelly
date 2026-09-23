@@ -55,7 +55,7 @@
     </f:entry>
 
     <f:entry field="deleteOnRestart"
-             description="By default a controller restart reconnects SSH agents and their builds resume. When enabled, a restart deletes this template's agents and sandboxes instead, and running builds fail. Inbound agents are always deleted on restart.">
+             description="By default a controller restart reconnects agents and their builds resume. When enabled, a restart deletes this template's agents and sandboxes instead, and running builds fail.">
         <f:checkbox title="Delete agents on controller restart" />
     </f:entry>
 

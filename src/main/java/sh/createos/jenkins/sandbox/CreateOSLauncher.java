@@ -118,12 +118,16 @@ public class CreateOSLauncher extends JNLPLauncher {
       return;
     }
 
+    // The sandbox this node owned before this attempt. A failed launch may only destroy a sandbox
+    // it created itself: this one can be a running build's workspace, kept across a restart.
+    String owned = null;
     try {
       final CreateOSSlave slave = createOSComputer.getNode();
       if (slave == null) {
         listener.error("Slave node is null");
         return;
       }
+      owned = slave.getSandboxId();
 
       final CreateOSCloud cloud = slave.getCreateOSCloud();
       final SandboxTemplate template = slave.getTemplate();
@@ -149,14 +153,24 @@ public class CreateOSLauncher extends JNLPLauncher {
       /*
        * Step 1: Create the sandbox, or adopt the one this agent already owns.
        *
-       * An SSH agent whose controller restarted still has its sandbox: the node records the id,
-       * the sandbox kept running, and its workspace and authorized_keys survived. Only the
-       * tunnel died, and that is rebuilt below. Creating a second sandbox here would strand the
-       * first one and throw away the workspace a build may still be resuming into.
+       * An agent whose controller restarted still has its sandbox: the node records the id, the
+       * sandbox kept running, and its workspace survived. Creating a second sandbox here would
+       * strand the first one and throw away the workspace a build may still be resuming into.
+       *
+       * An inbound agent needs nothing at all: its agent process is still running in that
+       * sandbox and reconnects its WebSocket by itself once the controller is back. Starting a
+       * second agent.jar would only race it for the same node. An SSH agent lost its tunnel with
+       * the controller process, so it is relaunched through a new one below.
        */
       String sandboxId;
       if (adoptsExistingSandbox(slave, apiClient)) {
         sandboxId = slave.getSandboxId();
+        if (template.sshLauncher() == null) {
+          listener
+              .getLogger()
+              .println("Sandbox " + sandboxId + " is still running; waiting for its agent.");
+          return;
+        }
         listener.getLogger().println("Reconnecting to existing sandbox: " + sandboxId);
       } else {
         CreateOSSandboxRequest request =
@@ -187,7 +201,7 @@ public class CreateOSLauncher extends JNLPLauncher {
 
       try {
         CreateOSSlave slave = createOSComputer.getNode();
-        if (slave != null && slave.getSandboxId() != null) {
+        if (slave != null && slave.getSandboxId() != null && !slave.getSandboxId().equals(owned)) {
           slave.terminateBackingSandbox(listener);
         }
       } catch (Exception cleanup) {
@@ -401,6 +415,6 @@ public class CreateOSLauncher extends JNLPLauncher {
    */
   static boolean adoptsExistingSandbox(CreateOSSlave slave, CreateOSApiClient apiClient) {
     String sandboxId = slave.getSandboxId();
-    return slave.isSshLaunch() && sandboxId != null && apiClient.isRunning(sandboxId);
+    return sandboxId != null && apiClient.isRunning(sandboxId);
   }
 }

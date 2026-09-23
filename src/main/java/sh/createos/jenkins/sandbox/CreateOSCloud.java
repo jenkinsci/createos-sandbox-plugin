@@ -63,16 +63,14 @@ public class CreateOSCloud extends Cloud {
   /**
    * Decides what to do with each CreateOS agent restored from an earlier controller process.
    *
-   * <p>An SSH agent whose sandbox is still running is reconnected rather than destroyed: the
-   * sandbox kept its workspace, so a Pipeline that was mid-build can resume through Durable Task.
-   * Only the tunnel died with the previous JVM, and relaunching rebuilds it.
+   * <p>An agent whose sandbox is still running is kept rather than destroyed: the sandbox kept its
+   * workspace, so a Pipeline that was mid-build can resume through Durable Task. An inbound agent's
+   * process is still running in that sandbox and reconnects its WebSocket by itself; an SSH agent
+   * only lost its tunnel with the previous JVM, and Jenkins relaunches it through a new one.
    *
    * <p>A template can opt out with "Delete agents on controller restart", for agents meant to be
-   * strictly one-process-lifetime; those are terminated like everything below.
-   *
-   * <p>Everything else is terminated, as it always was. An inbound agent is not recovered here
-   * because its agent process is reached over a WebSocket this plugin never re-establishes, and a
-   * node whose sandbox has gone has nothing left to reconnect to.
+   * strictly one-process-lifetime; those are terminated, as is a node whose sandbox has gone and so
+   * has nothing left to reconnect to.
    *
    * <p>Driven from {@link ItemListener#onLoaded()} rather than an {@code @Initializer}: the work
    * needs {@link Computer} objects, which exist only once startup is finished, and
@@ -100,13 +98,11 @@ public class CreateOSCloud extends Cloud {
   }
 
   /**
-   * Whether an agent from a previous controller process should be reconnected: SSH, a sandbox that
-   * is still running, and a template that has not opted into deletion on restart.
+   * Whether an agent from a previous controller process should be reconnected: a sandbox that is
+   * still running, and a template that has not opted into deletion on restart.
    */
   static boolean isRecoverable(CreateOSSlave node) {
-    if (!node.isSshLaunch()
-        || node.getSandboxId() == null
-        || node.getTemplate().isDeleteOnRestart()) {
+    if (node.getSandboxId() == null || node.getTemplate().isDeleteOnRestart()) {
       return false;
     }
     try {
