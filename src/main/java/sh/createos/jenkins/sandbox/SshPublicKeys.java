@@ -1,16 +1,18 @@
 package sh.createos.jenkins.sandbox;
 
 import com.cloudbees.jenkins.plugins.sshcredentials.SSHUserPrivateKey;
-import com.trilead.ssh2.crypto.PEMDecoder;
 import hudson.util.Secret;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.security.KeyPair;
-import java.util.Base64;
+import java.util.Iterator;
 import java.util.List;
-import org.bouncycastle.crypto.util.OpenSSHPublicKeyUtil;
-import org.bouncycastle.crypto.util.PublicKeyFactory;
+import org.apache.sshd.common.NamedResource;
+import org.apache.sshd.common.config.keys.FilePasswordProvider;
+import org.apache.sshd.common.config.keys.PublicKeyEntry;
+import org.apache.sshd.common.util.security.SecurityUtils;
 
 /**
  * Derives the {@code authorized_keys} line for an SSH credential.
@@ -19,11 +21,12 @@ import org.bouncycastle.crypto.util.PublicKeyFactory;
  * configures the credential and nothing else: there is no second field to paste, and no way to
  * paste a public key that does not match the private one the launcher authenticates with.
  *
- * <p>The private key is read with Trilead, the same library {@code SSHLauncher} authenticates with.
- * That is what makes the set of derivable keys exactly the set of usable keys: a key this class
- * rejects could not have logged in anyway, and — the case that matters — a passphrase-protected key
- * in OpenSSH's own container, which {@code ssh-keygen} produces by default, stays usable rather
- * than failing after the sandbox has been created.
+ * <p>The private key is read with Apache MINA SSHD rather than Trilead. Trilead is an abandoned
+ * library Jenkins keeps alive in a fork, reachable here only transitively through ssh-slaves, which
+ * is itself moving to MINA. MINA also reads a passphrase-protected key in OpenSSH's own container —
+ * what {@code ssh-keygen} writes by default — which BouncyCastle alone cannot, since that format is
+ * encrypted with bcrypt-pbkdf. Rejecting such a key would strand the agent after its sandbox had
+ * already been created.
  */
 final class SshPublicKeys {
 
@@ -39,32 +42,32 @@ final class SshPublicKeys {
   }
 
   /** Returns the OpenSSH public key matching a private key in PEM or OpenSSH format. */
-  static String authorizedKey(String privateKeyPem, Secret passphrase) throws IOException {
-    KeyPair keyPair = decode(privateKeyPem.trim(), passphrase);
-    byte[] blob =
-        OpenSSHPublicKeyUtil.encodePublicKey(
-            PublicKeyFactory.createKey(keyPair.getPublic().getEncoded()));
-    return keyType(blob) + " " + Base64.getEncoder().encodeToString(blob);
+  static String authorizedKey(String privateKey, Secret passphrase) throws IOException {
+    return PublicKeyEntry.toString(decode(privateKey.trim(), passphrase).getPublic());
   }
 
-  private static KeyPair decode(String privateKeyPem, Secret passphrase) throws IOException {
+  private static KeyPair decode(String privateKey, Secret passphrase) throws IOException {
     try {
-      return PEMDecoder.decodeKeyPair(privateKeyPem.toCharArray(), plainText(passphrase));
-    } catch (IOException | RuntimeException e) {
+      Iterable<KeyPair> keys =
+          SecurityUtils.loadKeyPairIdentities(
+              null,
+              NamedResource.ofName("SSH credential"),
+              new ByteArrayInputStream(privateKey.getBytes(StandardCharsets.UTF_8)),
+              passwordProvider(passphrase));
+      Iterator<KeyPair> first = keys == null ? null : keys.iterator();
+      if (first == null || !first.hasNext()) {
+        throw new IOException("no private key found");
+      }
+      return first.next();
+    } catch (IOException | GeneralSecurityException | RuntimeException e) {
       throw new IOException("Could not read the SSH private key: " + e.getMessage(), e);
     }
   }
 
-  /** Reads the key type the blob names itself, so every algorithm spells its own prefix. */
-  private static String keyType(byte[] blob) {
-    int length = ByteBuffer.wrap(blob, 0, 4).getInt();
-    return new String(blob, 4, length, StandardCharsets.US_ASCII);
-  }
-
-  private static String plainText(Secret passphrase) {
+  private static FilePasswordProvider passwordProvider(Secret passphrase) {
     if (passphrase == null || passphrase.getPlainText().isEmpty()) {
-      return null;
+      return FilePasswordProvider.EMPTY;
     }
-    return passphrase.getPlainText();
+    return FilePasswordProvider.of(passphrase.getPlainText());
   }
 }

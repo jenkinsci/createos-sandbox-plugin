@@ -62,8 +62,8 @@
   <dependencies>
     <!-- Derives the sandbox authorized_keys entry from the configured SSH credential -->
     <dependency>
-      <groupId>org.jenkins-ci.plugins</groupId>
-      <artifactId>bouncycastle-api</artifactId>
+      <groupId>io.jenkins.plugins.mina-sshd-api</groupId>
+      <artifactId>mina-sshd-api-common</artifactId>
     </dependency>
     <!-- Credentials plugin — stores API keys securely in Jenkins -->
     <dependency>
