@@ -9,9 +9,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import jenkins.model.Jenkins;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
+import org.kohsuke.stapler.verb.POST;
 
 /**
  * Configuration template for a CreateOS Sandbox agent.
@@ -54,6 +56,7 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
   @Deprecated private transient String sshCredentialsId;
 
   /** Public key written by plugin versions that could not derive it from the credential. */
+  // lgtm[jenkins/plaintext-storage] A public key, read only to migrate old config and never saved.
   @Deprecated private transient String sshPublicKey;
 
   /** Whether Jenkinsfiles may override this template through the createos Declarative agent. */
@@ -267,7 +270,9 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
     }
 
     /** Validates the optional root disk size override. */
+    @POST
     public FormValidation doCheckDiskMiB(@QueryParameter int value) {
+      Jenkins.get().checkPermission(Jenkins.ADMINISTER);
       if (value < 0) {
         return FormValidation.error("Disk size cannot be negative");
       }
@@ -275,8 +280,10 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
     }
 
     /** Rejects an idle timeout that would delete an agent before it could take a build. */
+    @POST
     public FormValidation doCheckIdleMinutes(
         @QueryParameter int value, @QueryParameter boolean reuseAgent) {
+      Jenkins.get().checkPermission(Jenkins.ADMINISTER);
       if (value < 0 || (value == 0 && !reuseAgent)) {
         return FormValidation.error("Idle timeout must be at least 1 minute");
       }
