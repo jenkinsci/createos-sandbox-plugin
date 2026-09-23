@@ -6,6 +6,8 @@ import hudson.model.Node;
 import hudson.model.TaskListener;
 import hudson.slaves.AbstractCloudComputer;
 import hudson.slaves.AbstractCloudSlave;
+import hudson.slaves.CloudRetentionStrategy;
+import hudson.slaves.RetentionStrategy;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -44,9 +46,21 @@ public class CreateOSSlave extends AbstractCloudSlave {
     setMode(Node.Mode.EXCLUSIVE);
     setNumExecutors(1);
 
-    // OnceRetentionStrategy: agent accepts one build then terminates, and is reaped after the
-    // template's idle timeout if it never gets one.
-    setRetentionStrategy(new OnceRetentionStrategy(template.getIdleMinutes()));
+    setRetentionStrategy(retentionStrategy(template));
+  }
+
+  /**
+   * One-shot agents take one build and are reaped after the idle timeout if they never get one.
+   * Reused agents take builds until idle for the timeout, or forever when it is 0.
+   */
+  static RetentionStrategy<?> retentionStrategy(SandboxTemplate template) {
+    int idleMinutes = template.getIdleMinutes();
+    if (!template.isReuseAgent()) {
+      return new OnceRetentionStrategy(idleMinutes);
+    }
+    return idleMinutes == 0
+        ? new RetentionStrategy.Always()
+        : new CloudRetentionStrategy(idleMinutes);
   }
 
   @Override

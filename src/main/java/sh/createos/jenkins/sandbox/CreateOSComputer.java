@@ -23,12 +23,13 @@ public class CreateOSComputer extends AbstractCloudComputer<CreateOSSlave> {
     super.taskAccepted(executor, task);
     LOGGER.fine("CreateOS agent " + getName() + " accepted task: " + task.getDisplayName());
 
-    // This is a one-shot agent. Stop the queue from selecting it for another build
-    // while its current build is still running, then provision for remaining work.
-    setAcceptingTasks(false);
-
+    // A one-shot agent must not be selected for another build while its current build is
+    // still running. Either way, provision for the remaining work.
     CreateOSSlave node = getNode();
     if (node != null) {
+      if (!node.getTemplate().isReuseAgent()) {
+        setAcceptingTasks(false);
+      }
       Label label = Jenkins.get().getLabel(node.getTemplate().getLabel());
       if (label != null) {
         label.nodeProvisioner.suggestReviewNow();

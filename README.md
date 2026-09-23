@@ -46,8 +46,12 @@ pipeline, so versions look like `3.v1a2b3c4d5e6f` rather than `1.2.3`.
    - **Private Networks**: optional CreateOS network ids or names, comma- or
      newline-separated
    - **Disks**: optional S3 disk mounts, each with `id`, `mountPath`, and optional `subPath`
-   - **Idle Timeout (minutes)**: how long an agent that has not taken a build is kept before
-     it is deleted with its sandbox (default 1)
+   - **Reuse agent between builds**: off by default, so each agent takes one build and is
+     then deleted. When enabled, an agent stays up for further builds, and its sandbox keeps
+     billing while idle.
+   - **Idle Timeout (minutes)**: how long an idle agent is kept before it is deleted with
+     its sandbox (default 1). With agent reuse enabled, `0` keeps agents forever; delete
+     them by hand when they are no longer needed.
    - **Delete agents on controller restart**: off by default, so a restart reconnects
      agents and their builds resume. Enable it for agents that must never outlive the
      controller process; a restart then deletes them and running builds fail.

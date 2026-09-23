@@ -78,6 +78,12 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
    */
   private boolean deleteOnRestart;
 
+  /**
+   * Whether an agent stays up to take further builds instead of being deleted after its first. Its
+   * sandbox keeps billing while idle, until the idle timeout; a timeout of 0 keeps it forever.
+   */
+  private boolean reuseAgent;
+
   static final int DEFAULT_IDLE_MINUTES = 1;
 
   /** Creates a sandbox template with its required Jenkins label, shape, and root filesystem. */
@@ -205,8 +211,12 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
     this.disks = disks != null ? disks : new ArrayList<>();
   }
 
+  /** 0 means never idle out, which only a reused agent may do: a one-shot agent would leak. */
   public int getIdleMinutes() {
-    return idleMinutes == null || idleMinutes < 1 ? DEFAULT_IDLE_MINUTES : idleMinutes;
+    if (idleMinutes == null || idleMinutes < 0 || (idleMinutes == 0 && !reuseAgent)) {
+      return DEFAULT_IDLE_MINUTES;
+    }
+    return idleMinutes;
   }
 
   @DataBoundSetter
@@ -223,6 +233,15 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
     this.deleteOnRestart = deleteOnRestart;
   }
 
+  public boolean isReuseAgent() {
+    return reuseAgent;
+  }
+
+  @DataBoundSetter
+  public void setReuseAgent(boolean reuseAgent) {
+    this.reuseAgent = reuseAgent;
+  }
+
   SandboxTemplate copyForPipeline(String label, String shape, String rootfs) {
     SandboxTemplate copy = new SandboxTemplate(label, shape, rootfs);
     copy.setRemoteFs(remoteFs);
@@ -234,6 +253,7 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
     copy.setDisks(new ArrayList<>(disks));
     copy.setIdleMinutes(getIdleMinutes());
     copy.setDeleteOnRestart(deleteOnRestart);
+    copy.setReuseAgent(reuseAgent);
     return copy;
   }
 
@@ -255,9 +275,14 @@ public class SandboxTemplate extends AbstractDescribableImpl<SandboxTemplate>
     }
 
     /** Rejects an idle timeout that would delete an agent before it could take a build. */
-    public FormValidation doCheckIdleMinutes(@QueryParameter int value) {
-      if (value < 1) {
+    public FormValidation doCheckIdleMinutes(
+        @QueryParameter int value, @QueryParameter boolean reuseAgent) {
+      if (value < 0 || (value == 0 && !reuseAgent)) {
         return FormValidation.error("Idle timeout must be at least 1 minute");
+      }
+      if (value == 0) {
+        return FormValidation.warning(
+            "Agents are never deleted: their sandboxes keep billing until removed by hand");
       }
       return FormValidation.ok();
     }

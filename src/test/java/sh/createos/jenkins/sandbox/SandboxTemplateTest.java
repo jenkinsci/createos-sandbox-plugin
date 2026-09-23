@@ -7,8 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import hudson.slaves.CloudRetentionStrategy;
+import hudson.slaves.RetentionStrategy;
 import java.util.List;
 import jenkins.model.Jenkins;
+import org.jenkinsci.plugins.durabletask.executors.OnceRetentionStrategy;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -129,5 +132,33 @@ class SandboxTemplateTest {
 
     assertEquals(7, copy.getIdleMinutes());
     assertTrue(copy.isDeleteOnRestart());
+  }
+
+  /** A one-shot agent that never idles out would leak its sandbox, so 0 needs agent reuse. */
+  @Test
+  void onlyReusedAgentsMayNeverIdleOut() {
+    SandboxTemplate template = new SandboxTemplate("createos", "s-1vcpu-1gb", "devbox:1");
+    template.setIdleMinutes(0);
+    assertEquals(SandboxTemplate.DEFAULT_IDLE_MINUTES, template.getIdleMinutes());
+
+    template.setReuseAgent(true);
+    assertEquals(0, template.getIdleMinutes());
+
+    SandboxTemplate copy = template.copyForPipeline("generated", "s-2vcpu-2gb", "devbox:1");
+    assertTrue(copy.isReuseAgent());
+    assertEquals(0, copy.getIdleMinutes());
+  }
+
+  @Test
+  void agentRetentionFollowsTheTemplate() {
+    SandboxTemplate template = new SandboxTemplate("createos", "s-1vcpu-1gb", "devbox:1");
+    assertInstanceOf(OnceRetentionStrategy.class, CreateOSSlave.retentionStrategy(template));
+
+    template.setReuseAgent(true);
+    template.setIdleMinutes(5);
+    assertInstanceOf(CloudRetentionStrategy.class, CreateOSSlave.retentionStrategy(template));
+
+    template.setIdleMinutes(0);
+    assertInstanceOf(RetentionStrategy.Always.class, CreateOSSlave.retentionStrategy(template));
   }
 }

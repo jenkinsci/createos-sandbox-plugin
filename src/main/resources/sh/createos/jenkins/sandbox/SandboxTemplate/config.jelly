@@ -49,9 +49,14 @@
         <f:textarea />
     </f:entry>
 
+    <f:entry field="reuseAgent"
+             description="By default an agent takes one build and is then deleted with its sandbox. When enabled, it stays up for further builds and its sandbox keeps billing while idle.">
+        <f:checkbox title="Reuse agent between builds" />
+    </f:entry>
+
     <f:entry title="Idle Timeout (minutes)" field="idleMinutes"
-             description="An agent that has not taken a build within this many minutes is deleted with its sandbox.">
-        <f:number default="1" min="1" />
+             description="An idle agent is deleted with its sandbox after this many minutes. With agent reuse enabled, 0 keeps agents forever.">
+        <f:number default="1" min="0" />
     </f:entry>
 
     <f:entry field="deleteOnRestart"
