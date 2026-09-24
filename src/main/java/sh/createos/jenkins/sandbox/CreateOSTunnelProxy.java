@@ -150,7 +150,9 @@ final class CreateOSTunnelProxy implements AutoCloseable {
             + "x-api-key: "
             + client.apiKey()
             + "\r\n"
-            + "User-Agent: createos-jenkins-plugin/0.1.0\r\n"
+            + "User-Agent: "
+            + CreateOSApiClient.USER_AGENT
+            + "\r\n"
             + "Connection: Upgrade\r\n"
             + "Upgrade: tcp-tunnel\r\n"
             + "Content-Length: 0\r\n"

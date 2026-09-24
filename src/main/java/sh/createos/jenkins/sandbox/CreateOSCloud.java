@@ -323,7 +323,7 @@ public class CreateOSCloud extends Cloud {
 
   /** Builds an authenticated API client from this cloud's configured Jenkins credential. */
   public CreateOSApiClient buildApiClient() {
-    String apiKey = resolveApiKey();
+    String apiKey = resolveApiKey(credentialsId);
     if (apiKey == null) {
       throw new IllegalStateException(
           "CreateOS API key not found for credential: " + credentialsId);
@@ -331,7 +331,7 @@ public class CreateOSCloud extends Cloud {
     return new CreateOSApiClient(apiUrl, apiKey);
   }
 
-  private String resolveApiKey() {
+  private static String resolveApiKey(String credentialsId) {
     StringCredentials cred =
         CredentialsMatchers.firstOrNull(
             CredentialsProvider.lookupCredentialsInItemGroup(
@@ -436,15 +436,11 @@ public class CreateOSCloud extends Cloud {
       // below and rendered back to the caller as an ordinary form-validation error.
       Jenkins.get().checkPermission(Jenkins.ADMINISTER);
       try {
-        StringCredentials cred =
-            CredentialsMatchers.firstOrNull(
-                CredentialsProvider.lookupCredentialsInItemGroup(
-                    StringCredentials.class, Jenkins.get(), ACL.SYSTEM2),
-                CredentialsMatchers.withId(credentialsId));
-        if (cred == null) {
+        String apiKey = resolveApiKey(credentialsId);
+        if (apiKey == null) {
           return FormValidation.error("Credential not found");
         }
-        new CreateOSApiClient(apiUrl, cred.getSecret().getPlainText()).testConnection();
+        new CreateOSApiClient(apiUrl, apiKey).testConnection();
         return FormValidation.ok("Connection successful");
       } catch (Exception e) {
         return FormValidation.error("Failed: " + e.getMessage());

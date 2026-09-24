@@ -55,33 +55,21 @@ public class CreateOSLauncher extends JNLPLauncher {
    */
   static String prepareCommand(String bakedJar, String remoteFsRaw, String rootfs, String jarUrl) {
     String remoteFs = shellQuote(remoteFsRaw);
-    return "set -e; mkdir -p "
-        + remoteFs
-        + "; command -v java >/dev/null || { echo 'java not found in rootfs' "
-        + shellQuote(rootfs)
-        + " '- build one with Dockerfile.agent' >&2; exit 127; };"
-        // -s and the ZIP magic, not -r: an empty or truncated file at this path would
-        // otherwise be copied over and fail much later, during the JNLP handshake, where
-        // the cause is no longer visible. A well-formed jar of the wrong VERSION still
-        // gets through here and is rejected at connect — the loud failure the pin is for.
-        + " if [ -s "
-        + bakedJar
-        + " ] && [ \"$(head -c2 "
-        + bakedJar
-        + ")\" = PK ]; then cp "
-        + bakedJar
-        + " "
-        + remoteFs
-        + "/agent.jar; echo 'agent.jar: baked into rootfs';"
-        + " else if [ -e "
-        + bakedJar
-        + " ]; then"
-        + " echo 'agent.jar: baked copy unusable, falling back to controller' >&2; fi;"
-        + " echo 'agent.jar: downloading from controller'; curl -fsSL "
-        + shellQuote(jarUrl)
-        + " -o "
-        + remoteFs
-        + "/agent.jar; fi";
+    // -s and the ZIP magic, not -r: an empty or truncated file at this path would
+    // otherwise be copied over and fail much later, during the JNLP handshake, where
+    // the cause is no longer visible. A well-formed jar of the wrong VERSION still
+    // gets through here and is rejected at connect — the loud failure the pin is for.
+    String script =
+        """
+        set -e; mkdir -p %2$s; command -v java >/dev/null || { echo 'java not found in rootfs' %3$s \
+        '- build one with Dockerfile.agent' >&2; exit 127; }; \
+        if [ -s %1$s ] && [ "$(head -c2 %1$s)" = PK ]; then cp %1$s %2$s/agent.jar; \
+        echo 'agent.jar: baked into rootfs'; \
+        else if [ -e %1$s ]; then \
+        echo 'agent.jar: baked copy unusable, falling back to controller' >&2; fi; \
+        echo 'agent.jar: downloading from controller'; curl -fsSL %4$s -o %2$s/agent.jar; fi\
+        """;
+    return script.formatted(bakedJar, remoteFs, shellQuote(rootfs), shellQuote(jarUrl));
   }
 
   /** Creates a launcher that connects the inbound agent over WebSocket. */
@@ -266,18 +254,8 @@ public class CreateOSLauncher extends JNLPLauncher {
     String agentName = slave.getNodeName();
 
     String agentCommand =
-        "java -jar "
-            + remoteFs
-            + "/agent.jar"
-            + " -url "
-            + shellQuote(jenkinsUrl)
-            + " -secret "
-            + shellQuote(secret)
-            + " -name "
-            + shellQuote(agentName)
-            + " -workDir "
-            + remoteFs
-            + " -webSocket";
+        "java -jar %1$s/agent.jar -url %2$s -secret %3$s -name %4$s -workDir %1$s -webSocket"
+            .formatted(remoteFs, shellQuote(jenkinsUrl), shellQuote(secret), shellQuote(agentName));
 
     listener.getLogger().println("Starting JNLP agent: " + agentName);
     // stdin is redirected too: the exec API blocks until every inherited stream is
@@ -380,35 +358,26 @@ public class CreateOSLauncher extends JNLPLauncher {
     String remoteFs = shellQuote(template.getRemoteFs());
     String runDir = shellQuote(sshdRunDir);
     String user = shellQuote(username);
-    return "set -e; mkdir -p "
-        + remoteFs
-        + " "
-        + runDir
-        + ";"
-        + " user="
-        + user
-        + ";"
-        + " home=$(getent passwd \"$user\" 2>/dev/null | cut -d: -f6 || true);"
-        + " if [ -z \"$home\" ] && [ \"$user\" = root ]; then home=/root; fi;"
-        + " if [ -z \"$home\" ] && [ -d \"/home/$user\" ]; then home=\"/home/$user\"; fi;"
-        + " if [ -z \"$home\" ]; then echo \"SSH user not found: $user\" >&2; exit 127; fi;"
-        + " mkdir -p \"$home/.ssh\";"
-        + " command -v java >/dev/null || { echo 'java not found in rootfs' >&2; exit 127; };"
-        + " sshd_path=$(command -v sshd || true);"
-        + " if [ -z \"$sshd_path\" ] && [ -x /usr/sbin/sshd ]; then sshd_path=/usr/sbin/sshd; fi;"
-        + " if [ -z \"$sshd_path\" ]; then echo 'sshd not found in rootfs' >&2; exit 127; fi;"
-        + " touch \"$home/.ssh/authorized_keys\";"
-        + " grep -qxF "
-        + publicKey
-        + " \"$home/.ssh/authorized_keys\" || printf '%s\\n' "
-        + publicKey
-        + " >> \"$home/.ssh/authorized_keys\";"
-        + " chown -R \"$user:$user\" \"$home/.ssh\" 2>/dev/null"
-        + " || chown -R \"$user\" \"$home/.ssh\";"
-        + " chmod 700 \"$home/.ssh\";"
-        + " chmod 600 \"$home/.ssh/authorized_keys\";"
-        + " ssh-keygen -A >/dev/null 2>&1 || true;"
-        + " pgrep -x sshd >/dev/null || \"$sshd_path\"";
+    String script =
+        """
+        set -e; mkdir -p %1$s %2$s; user=%3$s; \
+        home=$(getent passwd "$user" 2>/dev/null | cut -d: -f6 || true); \
+        if [ -z "$home" ] && [ "$user" = root ]; then home=/root; fi; \
+        if [ -z "$home" ] && [ -d "/home/$user" ]; then home="/home/$user"; fi; \
+        if [ -z "$home" ]; then echo "SSH user not found: $user" >&2; exit 127; fi; \
+        mkdir -p "$home/.ssh"; \
+        command -v java >/dev/null || { echo 'java not found in rootfs' >&2; exit 127; }; \
+        sshd_path=$(command -v sshd || true); \
+        if [ -z "$sshd_path" ] && [ -x /usr/sbin/sshd ]; then sshd_path=/usr/sbin/sshd; fi; \
+        if [ -z "$sshd_path" ]; then echo 'sshd not found in rootfs' >&2; exit 127; fi; \
+        touch "$home/.ssh/authorized_keys"; \
+        grep -qxF %4$s "$home/.ssh/authorized_keys" \
+        || printf '%%s\\n' %4$s >> "$home/.ssh/authorized_keys"; \
+        chown -R "$user:$user" "$home/.ssh" 2>/dev/null || chown -R "$user" "$home/.ssh"; \
+        chmod 700 "$home/.ssh"; chmod 600 "$home/.ssh/authorized_keys"; \
+        ssh-keygen -A >/dev/null 2>&1 || true; pgrep -x sshd >/dev/null || "$sshd_path"\
+        """;
+    return script.formatted(remoteFs, runDir, user, publicKey);
   }
 
   /**
