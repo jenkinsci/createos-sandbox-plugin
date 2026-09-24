@@ -131,7 +131,7 @@ public class CreateOSApiClient {
   private String resolveDiskId(String idOrName) throws IOException {
     JsonNode disk;
     try {
-      disk = getDisk(idOrName);
+      disk = get("/v1/disks/" + encode(idOrName));
     } catch (IOException e) {
       throw new IOException("CreateOS disk not found or not accessible: " + idOrName, e);
     }
@@ -150,29 +150,11 @@ public class CreateOSApiClient {
   private void validateNetworks(CreateOSSandboxRequest request) throws IOException {
     for (String networkId : request.networkIds()) {
       try {
-        getNetwork(networkId);
+        get("/v1/networks/" + encode(networkId));
       } catch (IOException e) {
         throw new IOException("CreateOS network not found or not accessible: " + networkId, e);
       }
     }
-  }
-
-  /**
-   * Get network details.
-   *
-   * <p>GET /v1/networks/{idOrName}
-   */
-  public JsonNode getNetwork(String idOrName) throws IOException {
-    return get("/v1/networks/" + encode(idOrName));
-  }
-
-  /**
-   * Get disk details.
-   *
-   * <p>GET /v1/disks/{idOrName}
-   */
-  public JsonNode getDisk(String idOrName) throws IOException {
-    return get("/v1/disks/" + encode(idOrName));
   }
 
   /** Get the current status of a sandbox. */
