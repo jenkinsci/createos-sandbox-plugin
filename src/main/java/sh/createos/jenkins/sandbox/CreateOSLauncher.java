@@ -107,7 +107,12 @@ public class CreateOSLauncher extends JNLPLauncher {
     if (exitCode == 0) {
       return true;
     }
-    listener.error(what + " failed (exit " + exitCode + "): " + result.path("stderr").asText());
+    listener.error(
+        what
+            + " failed (exit "
+            + exitCode
+            + "): "
+            + CreateOSApiClient.redactApiKeys(result.path("stderr").asText()));
     return false;
   }
 

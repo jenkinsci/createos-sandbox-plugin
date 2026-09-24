@@ -1,5 +1,6 @@
 package sh.createos.jenkins.sandbox;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -20,6 +21,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 /**
  * HTTP client for the CreateOS Sandbox control plane API.
@@ -31,6 +33,7 @@ public class CreateOSApiClient {
 
   private static final Logger LOGGER = Logger.getLogger(CreateOSApiClient.class.getName());
   private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final Pattern API_KEY_PATTERN = Pattern.compile("skp_[A-Za-z0-9_-]+");
 
   private final String baseUrl;
   // lgtm[jenkins/plaintext-storage] This client is transient and never persisted in Jenkins XML.
@@ -246,7 +249,10 @@ public class CreateOSApiClient {
       if (response.statusCode() >= 400) {
         String responseBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
         throw new IOException(
-            "CreateOS exec error: HTTP " + response.statusCode() + " — " + responseBody);
+            "CreateOS exec error: HTTP "
+                + response.statusCode()
+                + " — "
+                + redactApiKeys(responseBody));
       }
 
       StringBuilder stdout = collectStdout ? new StringBuilder() : null;
@@ -258,22 +264,27 @@ public class CreateOSApiClient {
           if (line.isBlank()) {
             continue;
           }
-          JsonNode event = MAPPER.readTree(line);
+          JsonNode event;
+          try {
+            event = MAPPER.readTree(line);
+          } catch (JsonProcessingException e) {
+            throw new IOException(redactApiKeys(e.getMessage()));
+          }
           if (event.path("hb").asBoolean(false)) {
             continue;
           }
           if (event.hasNonNull("stdout")) {
-            String value = event.get("stdout").asText();
+            String value = redactApiKeys(event.get("stdout").asText());
             log.print(value);
             if (stdout != null) {
               stdout.append(value);
             }
           }
           if (event.hasNonNull("stderr")) {
-            log.print(event.get("stderr").asText());
+            log.print(redactApiKeys(event.get("stderr").asText()));
           }
           if (event.hasNonNull("error")) {
-            log.println(event.get("error").asText());
+            log.println(redactApiKeys(event.get("error").asText()));
           }
           if (event.has("exit_code")) {
             exitCode = event.get("exit_code").asInt();
@@ -310,7 +321,7 @@ public class CreateOSApiClient {
                 + ": HTTP "
                 + response.statusCode()
                 + " — "
-                + response.body());
+                + redactApiKeys(response.body()));
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -341,7 +352,7 @@ public class CreateOSApiClient {
                 + ": HTTP "
                 + response.statusCode()
                 + " — "
-                + responseBody);
+                + redactApiKeys(responseBody));
       }
       try (InputStream body = response.body()) {
         body.transferTo(output);
@@ -443,6 +454,11 @@ public class CreateOSApiClient {
   /** Result from a CreateOS exec call. */
   public record ExecResult(int exitCode, String stdout) {}
 
+  /** Redacts CreateOS API keys while retaining the surrounding diagnostic text. */
+  static String redactApiKeys(String value) {
+    return value == null ? null : API_KEY_PATTERN.matcher(value).replaceAll("skp_[REDACTED]");
+  }
+
   /**
    * Execute request and unwrap JSend response. Returns the "data" node from { "status": "success",
    * "data": {...} }
@@ -454,12 +470,18 @@ public class CreateOSApiClient {
       String responseBody = response.body();
 
       if (response.statusCode() >= 400) {
-        LOGGER.warning("API error: HTTP " + response.statusCode() + " " + responseBody);
+        String redactedBody = redactApiKeys(responseBody);
+        LOGGER.warning("API error: HTTP " + response.statusCode() + " " + redactedBody);
         throw new IOException(
-            "CreateOS API error: HTTP " + response.statusCode() + " — " + responseBody);
+            "CreateOS API error: HTTP " + response.statusCode() + " — " + redactedBody);
       }
 
-      JsonNode root = MAPPER.readTree(responseBody);
+      JsonNode root;
+      try {
+        root = MAPPER.readTree(responseBody);
+      } catch (JsonProcessingException e) {
+        throw new IOException(redactApiKeys(e.getMessage()));
+      }
       JsonNode data = root.get("data");
       if (data == null) {
         throw new IOException("Invalid API response: missing 'data' field");
