@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
@@ -155,11 +156,7 @@ public class CreateOSSlave extends AbstractCloudSlave {
     try {
       byte[] hash =
           MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
-      StringBuilder hex = new StringBuilder();
-      for (int i = 0; hex.length() < length; i++) {
-        hex.append(String.format("%02x", hash[i]));
-      }
-      return hex.substring(0, length);
+      return HexFormat.of().formatHex(hash).substring(0, length);
     } catch (NoSuchAlgorithmException e) {
       throw new IllegalStateException("SHA-256 is required by every JVM", e);
     }
