@@ -34,6 +34,7 @@ public class CreateOSApiClient {
   private static final Logger LOGGER = Logger.getLogger(CreateOSApiClient.class.getName());
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final Pattern API_KEY_PATTERN = Pattern.compile("skp_[A-Za-z0-9_-]+");
+  static final String USER_AGENT = "createos-jenkins-plugin/0.1.0";
 
   private final String baseUrl;
   // lgtm[jenkins/plaintext-storage] This client is transient and never persisted in Jenkins XML.
@@ -233,14 +234,12 @@ public class CreateOSApiClient {
     body.put("stream", true);
 
     HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl + "/v1/sandboxes/" + sandboxId + "/exec?stream=true"))
+        request(
+                URI.create(baseUrl + "/v1/sandboxes/" + sandboxId + "/exec?stream=true"),
+                Duration.ofHours(1))
             .POST(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body)))
-            .header("x-api-key", apiKey)
             .header("Content-Type", "application/json")
             .header("Accept", "application/x-ndjson")
-            .header("User-Agent", "createos-jenkins-plugin/0.1.0")
-            .timeout(Duration.ofHours(1))
             .build();
 
     try {
@@ -302,13 +301,9 @@ public class CreateOSApiClient {
   public void uploadFile(String sandboxId, String remotePath, InputStream input)
       throws IOException {
     HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(fileUri(sandboxId, remotePath))
+        request(fileUri(sandboxId, remotePath), Duration.ofHours(1))
             .PUT(HttpRequest.BodyPublishers.ofInputStream(() -> input))
-            .header("x-api-key", apiKey)
             .header("Content-Type", "application/octet-stream")
-            .header("User-Agent", "createos-jenkins-plugin/0.1.0")
-            .timeout(Duration.ofHours(1))
             .build();
 
     try {
@@ -333,13 +328,7 @@ public class CreateOSApiClient {
   public void downloadFile(String sandboxId, String remotePath, OutputStream output)
       throws IOException {
     HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(fileUri(sandboxId, remotePath))
-            .GET()
-            .header("x-api-key", apiKey)
-            .header("User-Agent", "createos-jenkins-plugin/0.1.0")
-            .timeout(Duration.ofHours(1))
-            .build();
+        request(fileUri(sandboxId, remotePath), Duration.ofHours(1)).GET().build();
 
     try {
       HttpResponse<InputStream> response =
@@ -370,12 +359,8 @@ public class CreateOSApiClient {
    */
   public void destroySandbox(String sandboxId) throws IOException {
     HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl + "/v1/sandboxes/" + sandboxId))
+        request(URI.create(baseUrl + "/v1/sandboxes/" + sandboxId), Duration.ofSeconds(30))
             .DELETE()
-            .header("x-api-key", apiKey)
-            .header("User-Agent", "createos-jenkins-plugin/0.1.0")
-            .timeout(Duration.ofSeconds(30))
             .build();
 
     try {
@@ -417,30 +402,24 @@ public class CreateOSApiClient {
   // --- HTTP helpers ---
 
   private JsonNode get(String path) throws IOException {
-    HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl + path))
-            .GET()
-            .header("x-api-key", apiKey)
-            .header("User-Agent", "createos-jenkins-plugin/0.1.0")
-            .timeout(Duration.ofSeconds(120))
-            .build();
-
-    return executeAndUnwrap(request);
+    return executeAndUnwrap(
+        request(URI.create(baseUrl + path), Duration.ofSeconds(120)).GET().build());
   }
 
   private JsonNode post(String path, ObjectNode body) throws IOException {
-    HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl + path))
+    return executeAndUnwrap(
+        request(URI.create(baseUrl + path), Duration.ofSeconds(120))
             .POST(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body)))
-            .header("x-api-key", apiKey)
             .header("Content-Type", "application/json")
-            .header("User-Agent", "createos-jenkins-plugin/0.1.0")
-            .timeout(Duration.ofSeconds(120))
-            .build();
+            .build());
+  }
 
-    return executeAndUnwrap(request);
+  private HttpRequest.Builder request(URI uri, Duration timeout) {
+    return HttpRequest.newBuilder()
+        .uri(uri)
+        .header("x-api-key", apiKey)
+        .header("User-Agent", USER_AGENT)
+        .timeout(timeout);
   }
 
   private static String encode(String value) {
