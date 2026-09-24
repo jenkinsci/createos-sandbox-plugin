@@ -174,7 +174,7 @@ public class CreateOSSandboxStep extends Step implements Serializable, CreateOST
     }
   }
 
-  private static class CleanupCallback extends BodyExecutionCallback {
+  private static class CleanupCallback extends BodyExecutionCallback.TailCall {
 
     private static final long serialVersionUID = 1L;
     private static final Logger LOGGER = Logger.getLogger(CleanupCallback.class.getName());
@@ -186,18 +186,7 @@ public class CreateOSSandboxStep extends Step implements Serializable, CreateOST
     }
 
     @Override
-    public void onSuccess(StepContext context, Object result) {
-      cleanup(context);
-      context.onSuccess(result);
-    }
-
-    @Override
-    public void onFailure(StepContext context, Throwable t) {
-      cleanup(context);
-      context.onFailure(t);
-    }
-
-    private void cleanup(StepContext context) {
+    protected void finished(StepContext context) {
       try {
         TaskListener listener = context.get(TaskListener.class);
         listener.getLogger().println("Destroying CreateOS sandbox: " + sandboxContext.sandboxId());
