@@ -139,10 +139,10 @@ the Jenkinsfile override the inherited template for that Pipeline run only. The 
 generates a unique temporary label internally, so concurrent builds with different disks or
 networks cannot take each other's sandbox.
 
-Declarative `agent { createos ... }` always requires `inheritFrom`; a Jenkinsfile cannot
-build a fully ad-hoc template from shape and rootfs alone. This keeps root filesystems,
-launch mode, credentials, networks, and other privileged defaults anchored to
-administrator-defined templates.
+Both Declarative `agent { createos ... }` and exec-mode `createosSandbox(...)` require
+`inheritFrom`; a Jenkinsfile cannot build a fully ad-hoc template from shape and rootfs alone.
+This keeps root filesystems, launch mode, credentials, networks, disks, and other privileged
+defaults anchored to administrator-defined templates.
 
 Administrators control overrides per template with **Allow Pipeline-defined Overrides**.
 When disabled, Jenkinsfiles may still select that template by label, but may not inherit
@@ -162,6 +162,10 @@ Maven cache, which pipelines select with `agent { label 'createos-cache' }`.
 For short jobs, the exec-mode steps skip Jenkins node registration, JNLP, Remoting, and
 Durable Task. The Pipeline still needs a node for its workspace — name the CreateOS label,
 not `agent any` — but build commands run inside CreateOS through the exec API.
+
+`createosSandbox` must specify `inheritFrom`, naming a template configured by an administrator.
+Fields supplied by the Pipeline are applied only when that template allows Pipeline-defined
+overrides.
 
 ```groovy
 pipeline {
