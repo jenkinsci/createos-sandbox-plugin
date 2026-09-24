@@ -192,6 +192,24 @@ class CreateOSCloudTest {
   }
 
   @Test
+  void scriptedSandboxWithoutAdminTemplateIsRejected(JenkinsRule r) {
+    CreateOSCloud cloud = cloudWithTemplate("createos");
+    r.jenkins.clouds.add(cloud);
+
+    CreateOSSandboxStep step = new CreateOSSandboxStep();
+    step.setShape("s-8vcpu-8gb");
+    step.setRootfs("devbox:1");
+    step.setNetworks(List.of("internal-production"));
+    step.setDisks(List.of(new CreateOSDiskAttachment("admin-secrets", "/mnt/secrets")));
+
+    IOException thrown =
+        assertThrows(IOException.class, () -> CreateOSStepSupport.requestFromStep(step));
+
+    assertEquals(
+        "createosSandbox must inherit from an administrator-defined template", thrown.getMessage());
+  }
+
+  @Test
   void scriptedSandboxCanUseAdminTemplateWithoutOverridesWhenTemplateDisablesOverrides(
       JenkinsRule r) throws Exception {
     SandboxTemplate template = new SandboxTemplate("createos", "s-1vcpu-1gb", "devbox:1");
