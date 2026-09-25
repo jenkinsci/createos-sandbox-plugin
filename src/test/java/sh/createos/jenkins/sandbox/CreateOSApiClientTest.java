@@ -125,4 +125,31 @@ class CreateOSApiClientTest {
         DIAGNOSTIC + " skp_[REDACTED] remains visible",
         CreateOSApiClient.redactApiKeys(DIAGNOSTIC + " " + API_KEY + " remains visible"));
   }
+
+  @Test
+  void rejectsPlainHttpForRemoteApiEndpoints() {
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new CreateOSApiClient("http://api.example.test", "api-key"));
+
+    assertEquals(
+        "CreateOS API URL must use HTTPS; HTTP is allowed only for loopback addresses",
+        error.getMessage());
+  }
+
+  @Test
+  void acceptsHttpsAndExplicitLoopbackHttpEndpoints() {
+    assertEquals(
+        "https://api.example.test",
+        CreateOSApiClient.validateAndNormalizeBaseUrl("https://api.example.test/"));
+    assertEquals(
+        "http://localhost:8080",
+        CreateOSApiClient.validateAndNormalizeBaseUrl("http://localhost:8080/"));
+    assertEquals(
+        "http://127.0.0.1:8080",
+        CreateOSApiClient.validateAndNormalizeBaseUrl("http://127.0.0.1:8080/"));
+    assertEquals(
+        "http://[::1]:8080", CreateOSApiClient.validateAndNormalizeBaseUrl("http://[::1]:8080/"));
+  }
 }
