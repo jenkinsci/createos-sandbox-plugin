@@ -97,6 +97,49 @@ class CreateOSApiClientTest {
   }
 
   @Test
+  void execStreamReturnsExplicitSuccessExitCode() throws IOException {
+    responseStatus = 200;
+    responseBody = "{\"stdout\":\"done\\n\"}\n{\"exit_code\":0}\n";
+    ByteArrayOutputStream log = new ByteArrayOutputStream();
+
+    CreateOSApiClient.ExecResult result =
+        client.runShellScript("sandbox", "echo done", new PrintStream(log), true);
+
+    assertEquals(0, result.exitCode());
+    assertEquals("done\n", result.stdout());
+  }
+
+  @Test
+  void execStreamReturnsExplicitFailureExitCode() throws IOException {
+    responseStatus = 200;
+    responseBody = "{\"stderr\":\"failed\\n\"}\n{\"exit_code\":17}\n";
+
+    CreateOSApiClient.ExecResult result =
+        client.runShellScript(
+            "sandbox", "exit 17", new PrintStream(new ByteArrayOutputStream()), false);
+
+    assertEquals(17, result.exitCode());
+  }
+
+  @Test
+  void execStreamWithoutExitCodeFailsClosed() {
+    responseStatus = 200;
+    responseBody = "{\"stdout\":\"partial output\\n\"}\n";
+
+    IOException error =
+        assertThrows(
+            IOException.class,
+            () ->
+                client.runShellScript(
+                    "sandbox",
+                    "interrupted command",
+                    new PrintStream(new ByteArrayOutputStream()),
+                    false));
+
+    assertEquals("CreateOS exec stream ended without an exit_code event", error.getMessage());
+  }
+
+  @Test
   void fileTransferErrorsRetainDiagnosticsButRedactApiKeys() {
     IOException upload =
         assertThrows(
