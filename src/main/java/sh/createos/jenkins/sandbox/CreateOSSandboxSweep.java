@@ -85,12 +85,12 @@ public class CreateOSSandboxSweep extends AsyncPeriodicWork {
   }
 
   /**
-   * Names of sandboxes being provisioned right now. A launch in flight has already created its
-   * sandbox but has not yet recorded the id on a node, so its id cannot be matched — the name can,
-   * because it is derived from the agent name the cloud is already tracking.
+   * Names of sandboxes currently claimed by this cloud. This includes agent launches whose ids are
+   * not on a node yet and active exec-mode Pipeline blocks, neither of which should be reclaimed by
+   * the orphan sweep.
    */
   private static Set<String> pendingSandboxNames(CreateOSCloud cloud) {
-    Set<String> pending = new HashSet<>();
+    Set<String> pending = new HashSet<>(cloud.activeExecSandboxNames());
     for (String agentName : cloud.pendingAgentNames()) {
       pending.add(CreateOSSlave.sandboxName(agentName));
     }

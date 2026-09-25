@@ -34,6 +34,14 @@ class CreateOSCloudTest {
   }
 
   @Test
+  void sandboxCapsDefaultToOneHundred(JenkinsRule r) {
+    CreateOSCloud cloud = new CreateOSCloud("createos");
+
+    assertEquals(100, cloud.getContainerCap());
+    assertEquals(100, cloud.getExecSandboxCap());
+  }
+
+  @Test
   void canProvisionMatchesOnlyItsOwnLabel(JenkinsRule r) {
     CreateOSCloud cloud = cloudWithTemplate("createos");
 
@@ -71,6 +79,23 @@ class CreateOSCloudTest {
     r.jenkins.addNode(new CreateOSSlave("first-agent", first.getTemplates().get(0), first));
 
     assertEquals(1, second.provision(new CloudState(Label.get("second"), 0), 1).size());
+  }
+
+  @Test
+  void execSandboxCapIsIndependentFromAgentContainerCap(JenkinsRule r) {
+    CreateOSCloud cloud = cloudWithTemplate("createos");
+    cloud.setContainerCap(1);
+    cloud.setExecSandboxCap(1);
+
+    assertTrue(cloud.reserveExecSandbox("exec-one"));
+    assertFalse(cloud.reserveExecSandbox("exec-two"));
+    assertEquals(
+        1,
+        cloud.provision(new CloudState(Label.get("createos"), 0), 1).size(),
+        "an exec reservation must not consume agent capacity");
+
+    cloud.releaseExecSandbox("exec-one");
+    assertTrue(cloud.reserveExecSandbox("exec-two"));
   }
 
   @Test
