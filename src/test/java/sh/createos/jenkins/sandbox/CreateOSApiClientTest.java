@@ -12,6 +12,8 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,6 +28,7 @@ class CreateOSApiClientTest {
   private CreateOSApiClient client;
   private volatile int responseStatus = 422;
   private volatile String responseBody = DIAGNOSTIC + " " + API_KEY;
+  private final AtomicInteger requestCount = new AtomicInteger();
 
   @BeforeEach
   void startStubApi() throws IOException {
@@ -33,6 +36,7 @@ class CreateOSApiClientTest {
     server.createContext(
         "/",
         exchange -> {
+          requestCount.incrementAndGet();
           byte[] bytes = responseBody.getBytes(StandardCharsets.UTF_8);
           exchange.sendResponseHeaders(responseStatus, bytes.length);
           exchange.getResponseBody().write(bytes);
@@ -120,9 +124,40 @@ class CreateOSApiClientTest {
   }
 
   @Test
+  void createSandboxRejectsInvalidDiskPathsBeforeCallingApi() {
+    CreateOSDiskAttachment disk = new CreateOSDiskAttachment("shared-disk", "/mnt/../etc");
+    disk.setSubPath("safe");
+    CreateOSSandboxRequest request = sandboxRequest(disk);
+
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> client.createSandbox(request));
+
+    assertEquals("Mount path must not contain '..'", error.getMessage());
+    assertEquals(0, requestCount.get());
+  }
+
+  @Test
+  void createSandboxRejectsInvalidDiskSubPathBeforeCallingApi() {
+    CreateOSDiskAttachment disk = new CreateOSDiskAttachment("shared-disk", "/mnt/data");
+    disk.setSubPath("../../other-tenant");
+    CreateOSSandboxRequest request = sandboxRequest(disk);
+
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> client.createSandbox(request));
+
+    assertEquals("Sub path must not contain '..'", error.getMessage());
+    assertEquals(0, requestCount.get());
+  }
+
+  @Test
   void redactionChangesOnlyApiKeyShapedValues() {
     assertEquals(
         DIAGNOSTIC + " skp_[REDACTED] remains visible",
         CreateOSApiClient.redactApiKeys(DIAGNOSTIC + " " + API_KEY + " remains visible"));
+  }
+
+  private static CreateOSSandboxRequest sandboxRequest(CreateOSDiskAttachment disk) {
+    return new CreateOSSandboxRequest(
+        "test-sandbox", "s-1vcpu-1gb", "debian:13", null, 0, List.of(), List.of(disk));
   }
 }
