@@ -415,17 +415,16 @@ public class CreateOSCloud extends Cloud {
               CredentialsMatchers.always());
     }
 
-    /** Validates that the configured API endpoint is an HTTP URL. */
+    /** Validates that the configured API endpoint uses TLS, except for local test servers. */
     @POST
     public FormValidation doCheckApiUrl(@QueryParameter String value) {
       Jenkins.get().checkPermission(Jenkins.ADMINISTER);
-      if (value == null || value.isBlank()) {
-        return FormValidation.error("API URL is required");
+      try {
+        CreateOSApiClient.validateAndNormalizeBaseUrl(value);
+        return FormValidation.ok();
+      } catch (IllegalArgumentException e) {
+        return FormValidation.error(e.getMessage());
       }
-      if (!value.startsWith("http://") && !value.startsWith("https://")) {
-        return FormValidation.error("Must start with http:// or https://");
-      }
-      return FormValidation.ok();
     }
 
     /** Tests the configured credential against the CreateOS API. */

@@ -28,7 +28,8 @@ pipeline, so versions look like `3.v1a2b3c4d5e6f` rather than `1.2.3`.
    API key.
 2. **Manage Jenkins > Clouds > New cloud** — select "CreateOS Sandbox".
 3. Configure the cloud:
-   - **API URL**: `https://api.sb.createos.sh`
+   - **API URL**: `https://api.sb.createos.sh` (HTTPS is required except for explicit loopback
+     addresses used by local test servers)
    - **Credentials**: the API key credential from step 1
    - **Container Cap**: maximum concurrent sandboxes (default 10)
 4. Add a **Sandbox Template**:

@@ -112,6 +112,40 @@ class CreateOSCloudTest {
   }
 
   @Test
+  void apiUrlValidationRequiresHttpsOutsideLoopback(JenkinsRule r) {
+    CreateOSCloud.DescriptorImpl descriptor =
+        r.jenkins.getDescriptorByType(CreateOSCloud.DescriptorImpl.class);
+
+    assertEquals(FormValidation.Kind.OK, descriptor.doCheckApiUrl("https://api.example.test").kind);
+    assertEquals(FormValidation.Kind.OK, descriptor.doCheckApiUrl("http://localhost:8080").kind);
+    assertEquals(FormValidation.Kind.OK, descriptor.doCheckApiUrl("http://127.0.0.1:8080").kind);
+    assertEquals(
+        FormValidation.Kind.ERROR, descriptor.doCheckApiUrl("http://api.example.test").kind);
+  }
+
+  @Test
+  void restoredRemoteHttpConfigurationIsRejectedAtRuntime(JenkinsRule r) {
+    SystemCredentialsProvider.getInstance()
+        .getCredentials()
+        .add(
+            new StringCredentialsImpl(
+                CredentialsScope.GLOBAL,
+                "createos-insecure",
+                "Insecure endpoint test",
+                Secret.fromString("sk-test")));
+    CreateOSCloud cloud = new CreateOSCloud("createos");
+    cloud.setCredentialsId("createos-insecure");
+    cloud.setApiUrl("http://api.example.test");
+
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, cloud::buildApiClient);
+
+    assertEquals(
+        "CreateOS API URL must use HTTPS; HTTP is allowed only for loopback addresses",
+        error.getMessage());
+  }
+
+  @Test
   void declarativeOverridesAreRejectedWhenTemplateDisablesThem(JenkinsRule r) {
     SandboxTemplate template = new SandboxTemplate("createos", "s-1vcpu-1gb", "devbox:1");
     template.setAllowPipelineOverrides(false);
