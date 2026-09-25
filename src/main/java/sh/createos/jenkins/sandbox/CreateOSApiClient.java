@@ -1,5 +1,6 @@
 package sh.createos.jenkins.sandbox;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -20,6 +21,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 /**
  * HTTP client for the CreateOS Sandbox control plane API.
@@ -31,6 +33,8 @@ public class CreateOSApiClient {
 
   private static final Logger LOGGER = Logger.getLogger(CreateOSApiClient.class.getName());
   private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final Pattern API_KEY_PATTERN = Pattern.compile("skp_[A-Za-z0-9_-]+");
+  static final String USER_AGENT = "createos-jenkins-plugin/0.1.0";
 
   private final String baseUrl;
   // lgtm[jenkins/plaintext-storage] This client is transient and never persisted in Jenkins XML.
@@ -127,7 +131,7 @@ public class CreateOSApiClient {
   private String resolveDiskId(String idOrName) throws IOException {
     JsonNode disk;
     try {
-      disk = getDisk(idOrName);
+      disk = get("/v1/disks/" + encode(idOrName));
     } catch (IOException e) {
       throw new IOException("CreateOS disk not found or not accessible: " + idOrName, e);
     }
@@ -146,29 +150,11 @@ public class CreateOSApiClient {
   private void validateNetworks(CreateOSSandboxRequest request) throws IOException {
     for (String networkId : request.networkIds()) {
       try {
-        getNetwork(networkId);
+        get("/v1/networks/" + encode(networkId));
       } catch (IOException e) {
         throw new IOException("CreateOS network not found or not accessible: " + networkId, e);
       }
     }
-  }
-
-  /**
-   * Get network details.
-   *
-   * <p>GET /v1/networks/{idOrName}
-   */
-  public JsonNode getNetwork(String idOrName) throws IOException {
-    return get("/v1/networks/" + encode(idOrName));
-  }
-
-  /**
-   * Get disk details.
-   *
-   * <p>GET /v1/disks/{idOrName}
-   */
-  public JsonNode getDisk(String idOrName) throws IOException {
-    return get("/v1/disks/" + encode(idOrName));
   }
 
   /** Get the current status of a sandbox. */
@@ -230,14 +216,12 @@ public class CreateOSApiClient {
     body.put("stream", true);
 
     HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl + "/v1/sandboxes/" + sandboxId + "/exec?stream=true"))
+        request(
+                URI.create(baseUrl + "/v1/sandboxes/" + sandboxId + "/exec?stream=true"),
+                Duration.ofHours(1))
             .POST(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body)))
-            .header("x-api-key", apiKey)
             .header("Content-Type", "application/json")
             .header("Accept", "application/x-ndjson")
-            .header("User-Agent", "createos-jenkins-plugin/0.1.0")
-            .timeout(Duration.ofHours(1))
             .build();
 
     try {
@@ -246,7 +230,10 @@ public class CreateOSApiClient {
       if (response.statusCode() >= 400) {
         String responseBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
         throw new IOException(
-            "CreateOS exec error: HTTP " + response.statusCode() + " — " + responseBody);
+            "CreateOS exec error: HTTP "
+                + response.statusCode()
+                + " — "
+                + redactApiKeys(responseBody));
       }
 
       StringBuilder stdout = collectStdout ? new StringBuilder() : null;
@@ -258,22 +245,27 @@ public class CreateOSApiClient {
           if (line.isBlank()) {
             continue;
           }
-          JsonNode event = MAPPER.readTree(line);
+          JsonNode event;
+          try {
+            event = MAPPER.readTree(line);
+          } catch (JsonProcessingException e) {
+            throw new IOException(redactApiKeys(e.getMessage()));
+          }
           if (event.path("hb").asBoolean(false)) {
             continue;
           }
           if (event.hasNonNull("stdout")) {
-            String value = event.get("stdout").asText();
+            String value = redactApiKeys(event.get("stdout").asText());
             log.print(value);
             if (stdout != null) {
               stdout.append(value);
             }
           }
           if (event.hasNonNull("stderr")) {
-            log.print(event.get("stderr").asText());
+            log.print(redactApiKeys(event.get("stderr").asText()));
           }
           if (event.hasNonNull("error")) {
-            log.println(event.get("error").asText());
+            log.println(redactApiKeys(event.get("error").asText()));
           }
           if (event.has("exit_code")) {
             exitCode = event.get("exit_code").asInt();
@@ -291,13 +283,9 @@ public class CreateOSApiClient {
   public void uploadFile(String sandboxId, String remotePath, InputStream input)
       throws IOException {
     HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(fileUri(sandboxId, remotePath))
+        request(fileUri(sandboxId, remotePath), Duration.ofHours(1))
             .PUT(HttpRequest.BodyPublishers.ofInputStream(() -> input))
-            .header("x-api-key", apiKey)
             .header("Content-Type", "application/octet-stream")
-            .header("User-Agent", "createos-jenkins-plugin/0.1.0")
-            .timeout(Duration.ofHours(1))
             .build();
 
     try {
@@ -310,7 +298,7 @@ public class CreateOSApiClient {
                 + ": HTTP "
                 + response.statusCode()
                 + " — "
-                + response.body());
+                + redactApiKeys(response.body()));
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -322,13 +310,7 @@ public class CreateOSApiClient {
   public void downloadFile(String sandboxId, String remotePath, OutputStream output)
       throws IOException {
     HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(fileUri(sandboxId, remotePath))
-            .GET()
-            .header("x-api-key", apiKey)
-            .header("User-Agent", "createos-jenkins-plugin/0.1.0")
-            .timeout(Duration.ofHours(1))
-            .build();
+        request(fileUri(sandboxId, remotePath), Duration.ofHours(1)).GET().build();
 
     try {
       HttpResponse<InputStream> response =
@@ -341,7 +323,7 @@ public class CreateOSApiClient {
                 + ": HTTP "
                 + response.statusCode()
                 + " — "
-                + responseBody);
+                + redactApiKeys(responseBody));
       }
       try (InputStream body = response.body()) {
         body.transferTo(output);
@@ -359,12 +341,8 @@ public class CreateOSApiClient {
    */
   public void destroySandbox(String sandboxId) throws IOException {
     HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl + "/v1/sandboxes/" + sandboxId))
+        request(URI.create(baseUrl + "/v1/sandboxes/" + sandboxId), Duration.ofSeconds(30))
             .DELETE()
-            .header("x-api-key", apiKey)
-            .header("User-Agent", "createos-jenkins-plugin/0.1.0")
-            .timeout(Duration.ofSeconds(30))
             .build();
 
     try {
@@ -406,30 +384,24 @@ public class CreateOSApiClient {
   // --- HTTP helpers ---
 
   private JsonNode get(String path) throws IOException {
-    HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl + path))
-            .GET()
-            .header("x-api-key", apiKey)
-            .header("User-Agent", "createos-jenkins-plugin/0.1.0")
-            .timeout(Duration.ofSeconds(120))
-            .build();
-
-    return executeAndUnwrap(request);
+    return executeAndUnwrap(
+        request(URI.create(baseUrl + path), Duration.ofSeconds(120)).GET().build());
   }
 
   private JsonNode post(String path, ObjectNode body) throws IOException {
-    HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl + path))
+    return executeAndUnwrap(
+        request(URI.create(baseUrl + path), Duration.ofSeconds(120))
             .POST(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body)))
-            .header("x-api-key", apiKey)
             .header("Content-Type", "application/json")
-            .header("User-Agent", "createos-jenkins-plugin/0.1.0")
-            .timeout(Duration.ofSeconds(120))
-            .build();
+            .build());
+  }
 
-    return executeAndUnwrap(request);
+  private HttpRequest.Builder request(URI uri, Duration timeout) {
+    return HttpRequest.newBuilder()
+        .uri(uri)
+        .header("x-api-key", apiKey)
+        .header("User-Agent", USER_AGENT)
+        .timeout(timeout);
   }
 
   private static String encode(String value) {
@@ -443,6 +415,11 @@ public class CreateOSApiClient {
   /** Result from a CreateOS exec call. */
   public record ExecResult(int exitCode, String stdout) {}
 
+  /** Redacts CreateOS API keys while retaining the surrounding diagnostic text. */
+  static String redactApiKeys(String value) {
+    return value == null ? null : API_KEY_PATTERN.matcher(value).replaceAll("skp_[REDACTED]");
+  }
+
   /**
    * Execute request and unwrap JSend response. Returns the "data" node from { "status": "success",
    * "data": {...} }
@@ -454,12 +431,18 @@ public class CreateOSApiClient {
       String responseBody = response.body();
 
       if (response.statusCode() >= 400) {
-        LOGGER.warning("API error: HTTP " + response.statusCode() + " " + responseBody);
+        String redactedBody = redactApiKeys(responseBody);
+        LOGGER.warning("API error: HTTP " + response.statusCode() + " " + redactedBody);
         throw new IOException(
-            "CreateOS API error: HTTP " + response.statusCode() + " — " + responseBody);
+            "CreateOS API error: HTTP " + response.statusCode() + " — " + redactedBody);
       }
 
-      JsonNode root = MAPPER.readTree(responseBody);
+      JsonNode root;
+      try {
+        root = MAPPER.readTree(responseBody);
+      } catch (JsonProcessingException e) {
+        throw new IOException(redactApiKeys(e.getMessage()));
+      }
       JsonNode data = root.get("data");
       if (data == null) {
         throw new IOException("Invalid API response: missing 'data' field");

@@ -32,14 +32,14 @@ final class CreateOSStepSupport {
   static CreateOSSandboxRequest requestFromStep(CreateOSSandboxStep step) throws IOException {
     CreateOSCloud cloud = resolveCloud(step.getCloud());
 
-    SandboxTemplate inherited = null;
-    if (step.getInheritFrom() != null && !step.getInheritFrom().isBlank()) {
-      inherited = cloud.getTemplateByLabel(step.getInheritFrom());
-      if (inherited == null) {
-        throw new IOException("CreateOS template not found: " + step.getInheritFrom());
-      }
+    if (step.getInheritFrom() == null || step.getInheritFrom().isBlank()) {
+      throw new IOException("createosSandbox must inherit from an administrator-defined template");
     }
-    if (inherited != null && hasTemplateOverrides(step)) {
+    SandboxTemplate inherited = cloud.getTemplateByLabel(step.getInheritFrom());
+    if (inherited == null) {
+      throw new IOException("CreateOS template not found: " + step.getInheritFrom());
+    }
+    if (hasTemplateOverrides(step)) {
       try {
         inherited.rejectPipelineOverrides();
       } catch (IllegalStateException e) {
@@ -47,24 +47,21 @@ final class CreateOSStepSupport {
       }
     }
 
-    String shape = firstNonBlank(step.getShape(), inherited == null ? null : inherited.getShape());
-    String rootfs =
-        firstNonBlank(step.getRootfs(), inherited == null ? null : inherited.getRootfs());
+    String shape = firstNonBlank(step.getShape(), inherited.getShape());
+    String rootfs = firstNonBlank(step.getRootfs(), inherited.getRootfs());
     if (shape == null || rootfs == null) {
-      throw new IOException("shape and rootfs are required unless inheritFrom supplies them");
+      throw new IOException("Inherited CreateOS template must supply shape and rootfs");
     }
 
-    String region =
-        firstNonBlank(step.getRegion(), inherited == null ? null : inherited.getRegion());
-    int diskMiB =
-        step.getDiskMiB() > 0 ? step.getDiskMiB() : inherited == null ? 0 : inherited.getDiskMiB();
+    String region = firstNonBlank(step.getRegion(), inherited.getRegion());
+    int diskMiB = step.getDiskMiB() > 0 ? step.getDiskMiB() : inherited.getDiskMiB();
     List<String> networks =
         step.getNetworks() == null || step.getNetworks().isEmpty()
-            ? inherited == null ? List.of() : inherited.getNetworkIdList()
+            ? inherited.getNetworkIdList()
             : step.getNetworks();
     List<CreateOSDiskAttachment> disks =
         step.getDisks() == null || step.getDisks().isEmpty()
-            ? inherited == null ? List.of() : inherited.getDisks()
+            ? inherited.getDisks()
             : step.getDisks();
 
     // Execution assigns a controller-owned unique name after reserving exec capacity. The name

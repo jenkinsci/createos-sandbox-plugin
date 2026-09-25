@@ -24,11 +24,6 @@ public record CreateOSSandboxRequest(
         sandboxName, shape, rootfs, region, diskMiB, networkIds, disks);
   }
 
-  /** Builds a sandbox create request from a configured sandbox template. */
-  public static CreateOSSandboxRequest fromTemplate(SandboxTemplate template) {
-    return fromTemplate(template, null);
-  }
-
   /**
    * Builds a sandbox create request that names the sandbox after the agent it will back.
    *
