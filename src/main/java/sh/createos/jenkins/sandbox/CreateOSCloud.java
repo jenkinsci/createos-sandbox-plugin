@@ -18,6 +18,7 @@ import hudson.util.ListBoxModel;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -37,7 +38,20 @@ import org.kohsuke.stapler.verb.POST;
 /** Jenkins cloud implementation that provisions ephemeral CreateOS sandbox agents. */
 public class CreateOSCloud extends Cloud {
 
+  private static final int DEFAULT_SANDBOX_CAP = 100;
+
   private static final Logger LOGGER = Logger.getLogger(CreateOSCloud.class.getName());
+
+  /**
+   * Exec reservations shared by every in-memory version of a cloud configuration.
+   *
+   * <p>Saving Jenkins configuration replaces the {@link CreateOSCloud} instance. Keying the
+   * registry by cloud name keeps running Pipeline reservations and their lock visible to both the
+   * old and replacement instances. Entries intentionally live for the controller JVM lifetime;
+   * removing an empty entry could race with an older cloud instance and split the lock again.
+   */
+  private static final ConcurrentHashMap<String, ExecSandboxReservations>
+      EXEC_SANDBOX_RESERVATIONS = new ConcurrentHashMap<>();
 
   /** How long a recovered agent has to come back online before its sandbox is reclaimed. */
   private static final long RECONNECT_DEADLINE_MINUTES = 10;
@@ -46,6 +60,7 @@ public class CreateOSCloud extends Cloud {
   private String displayName;
   private String credentialsId;
   private int containerCap;
+  private int execSandboxCap;
   private List<SandboxTemplate> templates;
   private transient Set<String> pendingAgentNames = ConcurrentHashMap.newKeySet();
   private transient ConcurrentHashMap<String, SandboxTemplate> pipelineTemplates =
@@ -56,7 +71,8 @@ public class CreateOSCloud extends Cloud {
   public CreateOSCloud(String name) {
     super(name);
     this.apiUrl = "https://api.sb.createos.sh";
-    this.containerCap = 10;
+    this.containerCap = DEFAULT_SANDBOX_CAP;
+    this.execSandboxCap = DEFAULT_SANDBOX_CAP;
     this.templates = new ArrayList<>();
   }
 
@@ -321,6 +337,70 @@ public class CreateOSCloud extends Cloud {
     getPendingAgentNames().remove(agentName);
   }
 
+  /**
+   * Atomically reserves one slot for an exec-mode sandbox.
+   *
+   * <p>The reservation happens before the API call so concurrent Pipeline steps cannot all pass a
+   * count check and then create beyond the exec sandbox cap. This cap is separate from agent
+   * capacity so short exec-mode workloads cannot starve Jenkins agent provisioning.
+   */
+  boolean reserveExecSandbox(String sandboxName) {
+    return execSandboxReservations().reserve(sandboxName, getExecSandboxCap());
+  }
+
+  /** Restores an already-created exec sandbox to the in-memory set after Pipeline resume. */
+  void restoreExecSandbox(String sandboxName) {
+    if (sandboxName != null) {
+      execSandboxReservations().restore(sandboxName);
+    }
+  }
+
+  /** Releases an exec-mode capacity reservation after cleanup or failed startup. */
+  void releaseExecSandbox(String sandboxName) {
+    if (sandboxName != null) {
+      execSandboxReservations().release(sandboxName);
+    }
+  }
+
+  /** Controller-owned exec sandbox names that the orphan sweep must leave running. */
+  Set<String> activeExecSandboxNames() {
+    return execSandboxReservations().snapshot();
+  }
+
+  private ExecSandboxReservations execSandboxReservations() {
+    return EXEC_SANDBOX_RESERVATIONS.computeIfAbsent(
+        name, ignored -> new ExecSandboxReservations());
+  }
+
+  /** Serializes the cap check and mutation across all cloud instances with the same name. */
+  private static final class ExecSandboxReservations {
+
+    private final Set<String> names = new HashSet<>();
+
+    synchronized boolean reserve(String sandboxName, int cap) {
+      if (names.contains(sandboxName)) {
+        return true;
+      }
+      if (names.size() >= cap) {
+        return false;
+      }
+      names.add(sandboxName);
+      return true;
+    }
+
+    synchronized void restore(String sandboxName) {
+      names.add(sandboxName);
+    }
+
+    synchronized void release(String sandboxName) {
+      names.remove(sandboxName);
+    }
+
+    synchronized Set<String> snapshot() {
+      return Set.copyOf(names);
+    }
+  }
+
   /** Builds an authenticated API client from this cloud's configured Jenkins credential. */
   public CreateOSApiClient buildApiClient() {
     String apiKey = resolveApiKey(credentialsId);
@@ -377,6 +457,15 @@ public class CreateOSCloud extends Cloud {
   @DataBoundSetter
   public void setContainerCap(int containerCap) {
     this.containerCap = containerCap;
+  }
+
+  public int getExecSandboxCap() {
+    return execSandboxCap > 0 ? execSandboxCap : DEFAULT_SANDBOX_CAP;
+  }
+
+  @DataBoundSetter
+  public void setExecSandboxCap(int execSandboxCap) {
+    this.execSandboxCap = execSandboxCap;
   }
 
   public List<SandboxTemplate> getTemplates() {

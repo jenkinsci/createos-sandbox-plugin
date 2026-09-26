@@ -7,6 +7,7 @@ import java.io.Serializable;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import net.sf.json.JSONObject;
@@ -120,7 +121,8 @@ public class CreateOSSandboxStep extends Step implements Serializable, CreateOST
     private static final Logger LOGGER = Logger.getLogger(Execution.class.getName());
 
     private final CreateOSSandboxStep step;
-    private transient String sandboxId;
+    private String sandboxId;
+    private String sandboxName;
 
     Execution(StepContext context, CreateOSSandboxStep step) {
       super(context);
@@ -131,33 +133,76 @@ public class CreateOSSandboxStep extends Step implements Serializable, CreateOST
     public boolean start() throws Exception {
       TaskListener listener = getContext().get(TaskListener.class);
       CreateOSCloud cloud = CreateOSStepSupport.resolveCloud(step.getCloud());
-      CreateOSSandboxRequest request = CreateOSStepSupport.requestFromStep(step);
-      final CreateOSApiClient client = cloud.buildApiClient();
-
-      listener.getLogger().println("=== CreateOS Sandbox Exec Mode ===");
-      listener.getLogger().println("Shape: " + request.shape());
-      listener.getLogger().println("RootFS: " + request.rootfs());
-      // Parity with CreateOSLauncher, which prints these before creating an agent sandbox.
-      // Without them a dropped `disks:` or `networks:` is invisible: the sandbox comes up
-      // healthy, the commands run, and the only symptom is a mount path that does not exist.
-      if (!request.networkIds().isEmpty()) {
-        listener.getLogger().println("Private networks: " + request.networkIds());
+      sandboxName = CreateOSSlave.sandboxName("exec-" + UUID.randomUUID());
+      if (!cloud.reserveExecSandbox(sandboxName)) {
+        throw new IOException(
+            "CreateOS exec sandbox cap reached for cloud '"
+                + cloud.name
+                + "' ("
+                + cloud.getExecSandboxCap()
+                + ")");
       }
-      listener.getLogger().println("Disk attachments: " + request.disks().size());
-      listener.getLogger().println("Creating sandbox...");
-      sandboxId = client.createSandbox(request);
-      listener.getLogger().println("Sandbox created: " + sandboxId);
-      listener.getLogger().println("Waiting for sandbox to be ready...");
-      client.waitForRunning(sandboxId, Duration.ofMinutes(5));
-      listener.getLogger().println("Sandbox is running.");
 
-      CreateOSSandboxContext sandboxContext = new CreateOSSandboxContext(sandboxId, cloud.name);
-      getContext()
-          .newBodyInvoker()
-          .withContext(sandboxContext)
-          .withCallback(new CleanupCallback(sandboxContext))
-          .start();
-      return false;
+      boolean bodyStarted = false;
+      CreateOSApiClient client = null;
+      try {
+        CreateOSSandboxRequest request =
+            CreateOSStepSupport.requestFromStep(step).withName(sandboxName);
+        client = cloud.buildApiClient();
+        listener.getLogger().println("=== CreateOS Sandbox Exec Mode ===");
+        listener.getLogger().println("Shape: " + request.shape());
+        listener.getLogger().println("RootFS: " + request.rootfs());
+        // Parity with CreateOSLauncher, which prints these before creating an agent sandbox.
+        // Without them a dropped `disks:` or `networks:` is invisible: the sandbox comes up
+        // healthy, the commands run, and the only symptom is a mount path that does not exist.
+        if (!request.networkIds().isEmpty()) {
+          listener.getLogger().println("Private networks: " + request.networkIds());
+        }
+        listener.getLogger().println("Disk attachments: " + request.disks().size());
+        listener.getLogger().println("Creating sandbox...");
+        sandboxId = client.createSandbox(request);
+        listener.getLogger().println("Sandbox created: " + sandboxId);
+        listener.getLogger().println("Waiting for sandbox to be ready...");
+        client.waitForRunning(sandboxId, Duration.ofMinutes(5));
+        listener.getLogger().println("Sandbox is running.");
+
+        CreateOSSandboxContext sandboxContext = new CreateOSSandboxContext(sandboxId, cloud.name);
+        getContext()
+            .newBodyInvoker()
+            .withContext(sandboxContext)
+            .withCallback(new CleanupCallback(sandboxContext, sandboxName))
+            .start();
+        bodyStarted = true;
+        return false;
+      } finally {
+        if (!bodyStarted) {
+          cleanupAfterFailedStart(client, cloud, listener);
+        }
+      }
+    }
+
+    private void cleanupAfterFailedStart(
+        CreateOSApiClient client, CreateOSCloud cloud, TaskListener listener) {
+      try {
+        if (sandboxId != null) {
+          listener.getLogger().println("Destroying sandbox after failed startup: " + sandboxId);
+          client.destroySandbox(sandboxId);
+          sandboxId = null;
+        }
+      } catch (Exception e) {
+        LOGGER.log(Level.WARNING, "Failed to destroy sandbox after startup failure", e);
+      } finally {
+        cloud.releaseExecSandbox(sandboxName);
+      }
+    }
+
+    @Override
+    public void onResume() {
+      try {
+        CreateOSStepSupport.resolveCloud(step.getCloud()).restoreExecSandbox(sandboxName);
+      } catch (RuntimeException e) {
+        LOGGER.log(Level.WARNING, "Failed to restore exec sandbox reservation", e);
+      }
     }
 
     @Override
@@ -166,9 +211,15 @@ public class CreateOSSandboxStep extends Step implements Serializable, CreateOST
         try {
           CreateOSCloud cloud = CreateOSStepSupport.resolveCloud(step.getCloud());
           cloud.buildApiClient().destroySandbox(sandboxId);
+          sandboxId = null;
         } catch (IOException | RuntimeException e) {
           LOGGER.log(Level.WARNING, "Failed to destroy CreateOS sandbox after stop", e);
         }
+      }
+      try {
+        CreateOSStepSupport.resolveCloud(step.getCloud()).releaseExecSandbox(sandboxName);
+      } catch (RuntimeException e) {
+        LOGGER.log(Level.WARNING, "Failed to release exec sandbox reservation after stop", e);
       }
       super.stop(cause);
     }
@@ -180,9 +231,11 @@ public class CreateOSSandboxStep extends Step implements Serializable, CreateOST
     private static final Logger LOGGER = Logger.getLogger(CleanupCallback.class.getName());
 
     private final CreateOSSandboxContext sandboxContext;
+    private final String sandboxName;
 
-    CleanupCallback(CreateOSSandboxContext sandboxContext) {
+    CleanupCallback(CreateOSSandboxContext sandboxContext, String sandboxName) {
       this.sandboxContext = sandboxContext;
+      this.sandboxName = sandboxName;
     }
 
     @Override
@@ -194,6 +247,13 @@ public class CreateOSSandboxStep extends Step implements Serializable, CreateOST
         cloud.buildApiClient().destroySandbox(sandboxContext.sandboxId());
       } catch (Exception e) {
         LOGGER.log(Level.WARNING, "Failed to destroy CreateOS sandbox", e);
+      } finally {
+        try {
+          CreateOSStepSupport.resolveCloud(sandboxContext.cloudName())
+              .releaseExecSandbox(sandboxName);
+        } catch (RuntimeException e) {
+          LOGGER.log(Level.WARNING, "Failed to release exec sandbox reservation", e);
+        }
       }
     }
   }
