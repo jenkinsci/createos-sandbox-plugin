@@ -268,7 +268,8 @@ public class CreateOSApiClient {
             log.println(redactApiKeys(event.get("error").asText()));
           }
           if (event.has("exit_code")) {
-            exitCode = event.get("exit_code").asInt();
+            JsonNode value = event.get("exit_code");
+            exitCode = value.isInt() ? value.intValue() : null;
           }
         }
       }

@@ -140,6 +140,42 @@ class CreateOSApiClientTest {
   }
 
   @Test
+  void execStreamWithNullExitCodeFailsClosed() {
+    responseStatus = 200;
+    responseBody = "{\"exit_code\":null}\n";
+
+    IOException error =
+        assertThrows(
+            IOException.class,
+            () ->
+                client.runShellScript(
+                    "sandbox",
+                    "interrupted command",
+                    new PrintStream(new ByteArrayOutputStream()),
+                    false));
+
+    assertEquals("CreateOS exec stream ended without an exit_code event", error.getMessage());
+  }
+
+  @Test
+  void execStreamWithNonIntegerExitCodeFailsClosed() {
+    responseStatus = 200;
+    responseBody = "{\"exit_code\":\"not-a-number\"}\n";
+
+    IOException error =
+        assertThrows(
+            IOException.class,
+            () ->
+                client.runShellScript(
+                    "sandbox",
+                    "interrupted command",
+                    new PrintStream(new ByteArrayOutputStream()),
+                    false));
+
+    assertEquals("CreateOS exec stream ended without an exit_code event", error.getMessage());
+  }
+
+  @Test
   void fileTransferErrorsRetainDiagnosticsButRedactApiKeys() {
     IOException upload =
         assertThrows(
