@@ -45,6 +45,7 @@ class CreateOSSandboxStepTest {
       assertNotNull(api.createdName.get());
       assertTrue(CreateOSSlave.namedByThisController(api.createdName.get()));
       assertTrue(cloud.reserveExecSandbox("after-failure"), "startup released its capacity");
+      cloud.releaseExecSandbox("after-failure");
     }
   }
 
@@ -59,6 +60,7 @@ class CreateOSSandboxStepTest {
       assertEquals(1, api.creates.get());
       assertEquals(1, api.deletes.get());
       assertTrue(cloud.reserveExecSandbox("after-success"), "cleanup released its capacity");
+      cloud.releaseExecSandbox("after-success");
     }
   }
 
@@ -73,6 +75,7 @@ class CreateOSSandboxStepTest {
       assertEquals(Result.FAILURE, run.getResult());
       r.assertLogContains("CreateOS exec sandbox cap reached for cloud 'createos' (1)", run);
       assertEquals(0, api.creates.get());
+      cloud.releaseExecSandbox("already-running");
     }
   }
 

@@ -81,6 +81,14 @@ class CreateOSSandboxSweepTest {
     assertTrue(
         CreateOSSandboxSweep.reclaimable(List.of(sandbox), Set.of(), cloud.activeExecSandboxNames())
             .isEmpty());
+    cloud.releaseExecSandbox(sandboxName);
+  }
+
+  @Test
+  void firstSweepWaitsForPipelineReservationsToResume(JenkinsRule r) {
+    CreateOSSandboxSweep sweep = new CreateOSSandboxSweep();
+
+    assertEquals(sweep.getRecurrencePeriod(), sweep.getInitialDelay());
   }
 
   /**

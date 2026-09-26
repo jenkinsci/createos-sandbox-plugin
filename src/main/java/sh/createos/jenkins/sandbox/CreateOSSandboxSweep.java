@@ -44,6 +44,14 @@ public class CreateOSSandboxSweep extends AsyncPeriodicWork {
     return TimeUnit.MINUTES.toMillis(INTERVAL_MINUTES);
   }
 
+  /**
+   * Gives resumed Pipelines time to restore their exec reservations before the first orphan sweep.
+   */
+  @Override
+  public long getInitialDelay() {
+    return getRecurrencePeriod();
+  }
+
   @Override
   protected void execute(TaskListener listener) {
     for (Cloud configured : Jenkins.get().clouds) {

@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
 import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl;
 import org.junit.jupiter.api.Test;
@@ -96,6 +97,23 @@ class CreateOSCloudTest {
 
     cloud.releaseExecSandbox("exec-one");
     assertTrue(cloud.reserveExecSandbox("exec-two"));
+    cloud.releaseExecSandbox("exec-two");
+  }
+
+  @Test
+  void execReservationsSurviveCloudReconfiguration(JenkinsRule r) {
+    CreateOSCloud original = new CreateOSCloud("reconfigured");
+    original.setExecSandboxCap(1);
+    assertTrue(original.reserveExecSandbox("exec-running"));
+
+    CreateOSCloud replacement = new CreateOSCloud("reconfigured");
+    replacement.setExecSandboxCap(1);
+    assertEquals(Set.of("exec-running"), replacement.activeExecSandboxNames());
+    assertFalse(replacement.reserveExecSandbox("exec-over-cap"));
+
+    replacement.releaseExecSandbox("exec-running");
+    assertTrue(original.reserveExecSandbox("exec-after-release"));
+    original.releaseExecSandbox("exec-after-release");
   }
 
   @Test

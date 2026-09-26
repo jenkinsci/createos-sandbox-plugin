@@ -18,6 +18,7 @@ import hudson.util.ListBoxModel;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -41,6 +42,17 @@ public class CreateOSCloud extends Cloud {
 
   private static final Logger LOGGER = Logger.getLogger(CreateOSCloud.class.getName());
 
+  /**
+   * Exec reservations shared by every in-memory version of a cloud configuration.
+   *
+   * <p>Saving Jenkins configuration replaces the {@link CreateOSCloud} instance. Keying the
+   * registry by cloud name keeps running Pipeline reservations and their lock visible to both the
+   * old and replacement instances. Entries intentionally live for the controller JVM lifetime;
+   * removing an empty entry could race with an older cloud instance and split the lock again.
+   */
+  private static final ConcurrentHashMap<String, ExecSandboxReservations>
+      EXEC_SANDBOX_RESERVATIONS = new ConcurrentHashMap<>();
+
   /** How long a recovered agent has to come back online before its sandbox is reclaimed. */
   private static final long RECONNECT_DEADLINE_MINUTES = 10;
 
@@ -51,7 +63,6 @@ public class CreateOSCloud extends Cloud {
   private int execSandboxCap;
   private List<SandboxTemplate> templates;
   private transient Set<String> pendingAgentNames = ConcurrentHashMap.newKeySet();
-  private transient Set<String> activeExecSandboxNames = ConcurrentHashMap.newKeySet();
   private transient ConcurrentHashMap<String, SandboxTemplate> pipelineTemplates =
       new ConcurrentHashMap<>();
 
@@ -333,41 +344,61 @@ public class CreateOSCloud extends Cloud {
    * count check and then create beyond the exec sandbox cap. This cap is separate from agent
    * capacity so short exec-mode workloads cannot starve Jenkins agent provisioning.
    */
-  synchronized boolean reserveExecSandbox(String sandboxName) {
-    if (getActiveExecSandboxNames().contains(sandboxName)) {
-      return true;
-    }
-    if (getActiveExecSandboxNames().size() >= getExecSandboxCap()) {
-      return false;
-    }
-    getActiveExecSandboxNames().add(sandboxName);
-    return true;
+  boolean reserveExecSandbox(String sandboxName) {
+    return execSandboxReservations().reserve(sandboxName, getExecSandboxCap());
   }
 
   /** Restores an already-created exec sandbox to the in-memory set after Pipeline resume. */
-  synchronized void restoreExecSandbox(String sandboxName) {
+  void restoreExecSandbox(String sandboxName) {
     if (sandboxName != null) {
-      getActiveExecSandboxNames().add(sandboxName);
+      execSandboxReservations().restore(sandboxName);
     }
   }
 
   /** Releases an exec-mode capacity reservation after cleanup or failed startup. */
-  synchronized void releaseExecSandbox(String sandboxName) {
+  void releaseExecSandbox(String sandboxName) {
     if (sandboxName != null) {
-      getActiveExecSandboxNames().remove(sandboxName);
+      execSandboxReservations().release(sandboxName);
     }
   }
 
   /** Controller-owned exec sandbox names that the orphan sweep must leave running. */
   Set<String> activeExecSandboxNames() {
-    return Set.copyOf(getActiveExecSandboxNames());
+    return execSandboxReservations().snapshot();
   }
 
-  private Set<String> getActiveExecSandboxNames() {
-    if (activeExecSandboxNames == null) {
-      activeExecSandboxNames = ConcurrentHashMap.newKeySet();
+  private ExecSandboxReservations execSandboxReservations() {
+    return EXEC_SANDBOX_RESERVATIONS.computeIfAbsent(
+        name, ignored -> new ExecSandboxReservations());
+  }
+
+  /** Serializes the cap check and mutation across all cloud instances with the same name. */
+  private static final class ExecSandboxReservations {
+
+    private final Set<String> names = new HashSet<>();
+
+    synchronized boolean reserve(String sandboxName, int cap) {
+      if (names.contains(sandboxName)) {
+        return true;
+      }
+      if (names.size() >= cap) {
+        return false;
+      }
+      names.add(sandboxName);
+      return true;
     }
-    return activeExecSandboxNames;
+
+    synchronized void restore(String sandboxName) {
+      names.add(sandboxName);
+    }
+
+    synchronized void release(String sandboxName) {
+      names.remove(sandboxName);
+    }
+
+    synchronized Set<String> snapshot() {
+      return Set.copyOf(names);
+    }
   }
 
   /** Builds an authenticated API client from this cloud's configured Jenkins credential. */
