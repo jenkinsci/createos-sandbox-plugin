@@ -68,6 +68,7 @@ public class CreateOSApiClient {
    * <p>POST /v1/sandboxes
    */
   public String createSandbox(CreateOSSandboxRequest request) throws IOException {
+    validateDisks(request);
     validateNetworks(request);
 
     ObjectNode body = MAPPER.createObjectNode();
@@ -109,6 +110,13 @@ public class CreateOSApiClient {
     String sandboxId = data.get("id").asText();
     LOGGER.fine("Created sandbox: " + sandboxId);
     return sandboxId;
+  }
+
+  /** Fails before any API call when a disk path bypassed Jenkins form validation. */
+  private void validateDisks(CreateOSSandboxRequest request) {
+    for (CreateOSDiskAttachment disk : request.disks()) {
+      disk.validatePaths();
+    }
   }
 
   /**

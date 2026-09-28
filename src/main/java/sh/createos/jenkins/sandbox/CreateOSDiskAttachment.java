@@ -50,6 +50,47 @@ public class CreateOSDiskAttachment extends AbstractDescribableImpl<CreateOSDisk
     this.subPath = subPath;
   }
 
+  /**
+   * Validates paths again at runtime so Pipeline and restored configuration cannot bypass UI
+   * checks.
+   */
+  void validatePaths() {
+    String error = mountPathError(mountPath);
+    if (error != null) {
+      throw new IllegalArgumentException(error);
+    }
+    error = subPathError(subPath);
+    if (error != null) {
+      throw new IllegalArgumentException(error);
+    }
+  }
+
+  private static String mountPathError(String value) {
+    if (value == null || value.isBlank()) {
+      return "Mount path is required";
+    }
+    if (!value.startsWith("/")) {
+      return "Mount path must be absolute";
+    }
+    if (value.contains("..")) {
+      return "Mount path must not contain '..'";
+    }
+    return null;
+  }
+
+  private static String subPathError(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    if (value.startsWith("/")) {
+      return "Sub path must be relative";
+    }
+    if (value.contains("..")) {
+      return "Sub path must not contain '..'";
+    }
+    return null;
+  }
+
   /** Exposes disk attachment metadata and validation to Jenkins. */
   @Extension
   public static class DescriptorImpl extends Descriptor<CreateOSDiskAttachment> {
@@ -63,32 +104,16 @@ public class CreateOSDiskAttachment extends AbstractDescribableImpl<CreateOSDisk
     @POST
     public FormValidation doCheckMountPath(@QueryParameter String value) {
       Jenkins.get().checkPermission(Jenkins.ADMINISTER);
-      if (value == null || value.isBlank()) {
-        return FormValidation.error("Mount path is required");
-      }
-      if (!value.startsWith("/")) {
-        return FormValidation.error("Mount path must be absolute");
-      }
-      if (value.contains("..")) {
-        return FormValidation.error("Mount path must not contain '..'");
-      }
-      return FormValidation.ok();
+      String error = mountPathError(value);
+      return error == null ? FormValidation.ok() : FormValidation.error(error);
     }
 
     /** Validates that the optional sub-path stays within the disk prefix. */
     @POST
     public FormValidation doCheckSubPath(@QueryParameter String value) {
       Jenkins.get().checkPermission(Jenkins.ADMINISTER);
-      if (value == null || value.isBlank()) {
-        return FormValidation.ok();
-      }
-      if (value.startsWith("/")) {
-        return FormValidation.error("Sub path must be relative");
-      }
-      if (value.contains("..")) {
-        return FormValidation.error("Sub path must not contain '..'");
-      }
-      return FormValidation.ok();
+      String error = subPathError(value);
+      return error == null ? FormValidation.ok() : FormValidation.error(error);
     }
   }
 }
