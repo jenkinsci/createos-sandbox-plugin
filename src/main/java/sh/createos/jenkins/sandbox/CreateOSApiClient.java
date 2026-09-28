@@ -237,7 +237,7 @@ public class CreateOSApiClient {
       }
 
       StringBuilder stdout = collectStdout ? new StringBuilder() : null;
-      int exitCode = 0;
+      Integer exitCode = null;
       try (var reader =
           new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
         String line;
@@ -268,9 +268,13 @@ public class CreateOSApiClient {
             log.println(redactApiKeys(event.get("error").asText()));
           }
           if (event.has("exit_code")) {
-            exitCode = event.get("exit_code").asInt();
+            JsonNode value = event.get("exit_code");
+            exitCode = value.isInt() ? value.intValue() : null;
           }
         }
+      }
+      if (exitCode == null) {
+        throw new IOException("CreateOS exec stream ended without an exit_code event");
       }
       return new ExecResult(exitCode, stdout == null ? null : stdout.toString());
     } catch (InterruptedException e) {
