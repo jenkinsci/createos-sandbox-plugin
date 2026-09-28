@@ -43,10 +43,52 @@ public class CreateOSApiClient {
 
   /** Creates a client for the given CreateOS API endpoint and API key. */
   public CreateOSApiClient(String baseUrl, String apiKey) {
-    this.baseUrl = baseUrl.replaceAll("/+$", "");
+    this.baseUrl = validateAndNormalizeBaseUrl(baseUrl);
     this.apiKey = apiKey;
     this.httpClient =
         ProxyConfiguration.newHttpClientBuilder().connectTimeout(Duration.ofSeconds(30)).build();
+  }
+
+  /**
+   * Requires TLS for every non-loopback control-plane endpoint.
+   *
+   * <p>Loopback HTTP remains available for local test servers. It is intentionally limited to
+   * explicit loopback host names and addresses rather than arbitrary names that happen to resolve
+   * locally, so DNS cannot turn an accepted plaintext endpoint into a remote one later.
+   */
+  static String validateAndNormalizeBaseUrl(String baseUrl) {
+    if (baseUrl == null || baseUrl.isBlank()) {
+      throw new IllegalArgumentException("CreateOS API URL is required");
+    }
+
+    URI uri;
+    try {
+      uri = URI.create(baseUrl);
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException("CreateOS API URL is invalid", e);
+    }
+
+    String scheme = uri.getScheme();
+    String host = uri.getHost();
+    if (host == null || host.isBlank()) {
+      throw new IllegalArgumentException("CreateOS API URL must include a host");
+    }
+    if (!"https".equalsIgnoreCase(scheme)
+        && !("http".equalsIgnoreCase(scheme) && isExplicitLoopback(host))) {
+      throw new IllegalArgumentException(
+          "CreateOS API URL must use HTTPS; HTTP is allowed only for loopback addresses");
+    }
+    return baseUrl.replaceAll("/+$", "");
+  }
+
+  private static boolean isExplicitLoopback(String host) {
+    String normalized = host;
+    if (normalized.startsWith("[") && normalized.endsWith("]")) {
+      normalized = normalized.substring(1, normalized.length() - 1);
+    }
+    return "localhost".equalsIgnoreCase(normalized)
+        || "127.0.0.1".equals(normalized)
+        || "::1".equals(normalized);
   }
 
   String baseUrl() {
