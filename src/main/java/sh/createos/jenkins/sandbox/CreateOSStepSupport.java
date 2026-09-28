@@ -64,9 +64,9 @@ final class CreateOSStepSupport {
             ? inherited.getDisks()
             : step.getDisks();
 
-    // Deliberately unnamed: an exec-mode sandbox backs a pipeline block, not an agent, so it has
-    // no node for CreateOSSandboxSweep to match it against. Naming it the way agent sandboxes are
-    // named would make it look orphaned and get it destroyed underneath a running build.
+    // Execution assigns a controller-owned unique name after reserving exec capacity. The name
+    // lets CreateOSSandboxSweep reclaim failed starts while its active-name set protects running
+    // Pipeline blocks from the sweep.
     return new CreateOSSandboxRequest(null, shape, rootfs, region, diskMiB, networks, disks);
   }
 

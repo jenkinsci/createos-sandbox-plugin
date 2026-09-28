@@ -31,7 +31,8 @@ pipeline, so versions look like `3.v1a2b3c4d5e6f` rather than `1.2.3`.
    - **API URL**: `https://api.sb.createos.sh` (HTTPS is required except for explicit loopback
      addresses used by local test servers)
    - **Credentials**: the API key credential from step 1
-   - **Container Cap**: maximum concurrent sandboxes (default 10)
+   - **Container Cap**: maximum concurrent Jenkins agent sandboxes (default 100)
+   - **Exec Sandbox Cap**: maximum concurrent `createosSandbox` Pipeline blocks (default 100)
 4. Add a **Sandbox Template**:
    - **Label**: `createos`, or any label your jobs will request
    - **Shape**: for example `s-1vcpu-1gb`
@@ -214,8 +215,10 @@ pipeline {
 
 Step behaviour:
 
-- `createosSandbox` creates the sandbox, waits for `running`, runs the block, and destroys
-  the sandbox on success, failure, or abort.
+- `createosSandbox` reserves one of the cloud's **Exec Sandbox Cap** slots, creates the
+  sandbox, waits for `running`, runs the block, and destroys the sandbox on success,
+  failure, or abort. Controller-owned names also let the periodic sweep reclaim a sandbox
+  left behind by an interrupted startup or cleanup.
 - `createosSh` streams stdout/stderr into the Jenkins log and fails the step on a non-zero
   exit unless `returnStatus: true` is set.
 - `createosUpload` recursively uploads workspace files, or a single file, to an absolute

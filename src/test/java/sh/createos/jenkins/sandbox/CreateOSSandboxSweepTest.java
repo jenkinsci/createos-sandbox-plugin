@@ -71,6 +71,26 @@ class CreateOSSandboxSweepTest {
             .isEmpty());
   }
 
+  @Test
+  void keepsActiveExecSandbox(JenkinsRule r) {
+    CreateOSCloud cloud = new CreateOSCloud("createos");
+    String sandboxName = CreateOSSlave.sandboxName("exec-active");
+    assertTrue(cloud.reserveExecSandbox(sandboxName));
+    SandboxSummary sandbox = new SandboxSummary("sb-exec", sandboxName, "running");
+
+    assertTrue(
+        CreateOSSandboxSweep.reclaimable(List.of(sandbox), Set.of(), cloud.activeExecSandboxNames())
+            .isEmpty());
+    cloud.releaseExecSandbox(sandboxName);
+  }
+
+  @Test
+  void firstSweepWaitsForPipelineReservationsToResume(JenkinsRule r) {
+    CreateOSSandboxSweep sweep = new CreateOSSandboxSweep();
+
+    assertEquals(sweep.getRecurrencePeriod(), sweep.getInitialDelay());
+  }
+
   /**
    * Another Jenkins on the same account, or a human's own box, is not this controller's to kill.
    */

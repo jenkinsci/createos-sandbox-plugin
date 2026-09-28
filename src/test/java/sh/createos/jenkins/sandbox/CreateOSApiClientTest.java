@@ -12,6 +12,8 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,6 +28,7 @@ class CreateOSApiClientTest {
   private CreateOSApiClient client;
   private volatile int responseStatus = 422;
   private volatile String responseBody = DIAGNOSTIC + " " + API_KEY;
+  private final AtomicInteger requestCount = new AtomicInteger();
 
   @BeforeEach
   void startStubApi() throws IOException {
@@ -33,6 +36,7 @@ class CreateOSApiClientTest {
     server.createContext(
         "/",
         exchange -> {
+          requestCount.incrementAndGet();
           byte[] bytes = responseBody.getBytes(StandardCharsets.UTF_8);
           exchange.sendResponseHeaders(responseStatus, bytes.length);
           exchange.getResponseBody().write(bytes);
@@ -97,6 +101,85 @@ class CreateOSApiClientTest {
   }
 
   @Test
+  void execStreamReturnsExplicitSuccessExitCode() throws IOException {
+    responseStatus = 200;
+    responseBody = "{\"stdout\":\"done\\n\"}\n{\"exit_code\":0}\n";
+    ByteArrayOutputStream log = new ByteArrayOutputStream();
+
+    CreateOSApiClient.ExecResult result =
+        client.runShellScript("sandbox", "echo done", new PrintStream(log), true);
+
+    assertEquals(0, result.exitCode());
+    assertEquals("done\n", result.stdout());
+  }
+
+  @Test
+  void execStreamReturnsExplicitFailureExitCode() throws IOException {
+    responseStatus = 200;
+    responseBody = "{\"stderr\":\"failed\\n\"}\n{\"exit_code\":17}\n";
+
+    CreateOSApiClient.ExecResult result =
+        client.runShellScript(
+            "sandbox", "exit 17", new PrintStream(new ByteArrayOutputStream()), false);
+
+    assertEquals(17, result.exitCode());
+  }
+
+  @Test
+  void execStreamWithoutExitCodeFailsClosed() {
+    responseStatus = 200;
+    responseBody = "{\"stdout\":\"partial output\\n\"}\n";
+
+    IOException error =
+        assertThrows(
+            IOException.class,
+            () ->
+                client.runShellScript(
+                    "sandbox",
+                    "interrupted command",
+                    new PrintStream(new ByteArrayOutputStream()),
+                    false));
+
+    assertEquals("CreateOS exec stream ended without an exit_code event", error.getMessage());
+  }
+
+  @Test
+  void execStreamWithNullExitCodeFailsClosed() {
+    responseStatus = 200;
+    responseBody = "{\"exit_code\":null}\n";
+
+    IOException error =
+        assertThrows(
+            IOException.class,
+            () ->
+                client.runShellScript(
+                    "sandbox",
+                    "interrupted command",
+                    new PrintStream(new ByteArrayOutputStream()),
+                    false));
+
+    assertEquals("CreateOS exec stream ended without an exit_code event", error.getMessage());
+  }
+
+  @Test
+  void execStreamWithNonIntegerExitCodeFailsClosed() {
+    responseStatus = 200;
+    responseBody = "{\"exit_code\":\"not-a-number\"}\n";
+
+    IOException error =
+        assertThrows(
+            IOException.class,
+            () ->
+                client.runShellScript(
+                    "sandbox",
+                    "interrupted command",
+                    new PrintStream(new ByteArrayOutputStream()),
+                    false));
+
+    assertEquals("CreateOS exec stream ended without an exit_code event", error.getMessage());
+  }
+
+  @Test
   void fileTransferErrorsRetainDiagnosticsButRedactApiKeys() {
     IOException upload =
         assertThrows(
@@ -117,6 +200,32 @@ class CreateOSApiClientTest {
         download.getMessage());
     assertFalse(upload.getMessage().contains(API_KEY));
     assertFalse(download.getMessage().contains(API_KEY));
+  }
+
+  @Test
+  void createSandboxRejectsInvalidDiskPathsBeforeCallingApi() {
+    CreateOSDiskAttachment disk = new CreateOSDiskAttachment("shared-disk", "/mnt/../etc");
+    disk.setSubPath("safe");
+    CreateOSSandboxRequest request = sandboxRequest(disk);
+
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> client.createSandbox(request));
+
+    assertEquals("Mount path must not contain '..'", error.getMessage());
+    assertEquals(0, requestCount.get());
+  }
+
+  @Test
+  void createSandboxRejectsInvalidDiskSubPathBeforeCallingApi() {
+    CreateOSDiskAttachment disk = new CreateOSDiskAttachment("shared-disk", "/mnt/data");
+    disk.setSubPath("../../other-tenant");
+    CreateOSSandboxRequest request = sandboxRequest(disk);
+
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> client.createSandbox(request));
+
+    assertEquals("Sub path must not contain '..'", error.getMessage());
+    assertEquals(0, requestCount.get());
   }
 
   @Test
@@ -151,5 +260,10 @@ class CreateOSApiClientTest {
         CreateOSApiClient.validateAndNormalizeBaseUrl("http://127.0.0.1:8080/"));
     assertEquals(
         "http://[::1]:8080", CreateOSApiClient.validateAndNormalizeBaseUrl("http://[::1]:8080/"));
+  }
+
+  private static CreateOSSandboxRequest sandboxRequest(CreateOSDiskAttachment disk) {
+    return new CreateOSSandboxRequest(
+        "test-sandbox", "s-1vcpu-1gb", "debian:13", null, 0, List.of(), List.of(disk));
   }
 }
