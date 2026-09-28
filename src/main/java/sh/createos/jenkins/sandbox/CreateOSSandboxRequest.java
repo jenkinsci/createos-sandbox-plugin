@@ -18,6 +18,12 @@ public record CreateOSSandboxRequest(
     disks = disks == null ? List.of() : List.copyOf(disks);
   }
 
+  /** Returns this request with a controller-owned sandbox name. */
+  public CreateOSSandboxRequest withName(String sandboxName) {
+    return new CreateOSSandboxRequest(
+        sandboxName, shape, rootfs, region, diskMiB, networkIds, disks);
+  }
+
   /**
    * Builds a sandbox create request that names the sandbox after the agent it will back.
    *

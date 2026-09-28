@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
 import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,14 @@ class CreateOSCloudTest {
     CreateOSCloud cloud = new CreateOSCloud("createos");
     cloud.setTemplates(List.of(new SandboxTemplate(label, "s-1vcpu-1gb", "devbox:1")));
     return cloud;
+  }
+
+  @Test
+  void sandboxCapsDefaultToOneHundred(JenkinsRule r) {
+    CreateOSCloud cloud = new CreateOSCloud("createos");
+
+    assertEquals(100, cloud.getContainerCap());
+    assertEquals(100, cloud.getExecSandboxCap());
   }
 
   @Test
@@ -71,6 +80,40 @@ class CreateOSCloudTest {
     r.jenkins.addNode(new CreateOSSlave("first-agent", first.getTemplates().get(0), first));
 
     assertEquals(1, second.provision(new CloudState(Label.get("second"), 0), 1).size());
+  }
+
+  @Test
+  void execSandboxCapIsIndependentFromAgentContainerCap(JenkinsRule r) {
+    CreateOSCloud cloud = cloudWithTemplate("createos");
+    cloud.setContainerCap(1);
+    cloud.setExecSandboxCap(1);
+
+    assertTrue(cloud.reserveExecSandbox("exec-one"));
+    assertFalse(cloud.reserveExecSandbox("exec-two"));
+    assertEquals(
+        1,
+        cloud.provision(new CloudState(Label.get("createos"), 0), 1).size(),
+        "an exec reservation must not consume agent capacity");
+
+    cloud.releaseExecSandbox("exec-one");
+    assertTrue(cloud.reserveExecSandbox("exec-two"));
+    cloud.releaseExecSandbox("exec-two");
+  }
+
+  @Test
+  void execReservationsSurviveCloudReconfiguration(JenkinsRule r) {
+    CreateOSCloud original = new CreateOSCloud("reconfigured");
+    original.setExecSandboxCap(1);
+    assertTrue(original.reserveExecSandbox("exec-running"));
+
+    CreateOSCloud replacement = new CreateOSCloud("reconfigured");
+    replacement.setExecSandboxCap(1);
+    assertEquals(Set.of("exec-running"), replacement.activeExecSandboxNames());
+    assertFalse(replacement.reserveExecSandbox("exec-over-cap"));
+
+    replacement.releaseExecSandbox("exec-running");
+    assertTrue(original.reserveExecSandbox("exec-after-release"));
+    original.releaseExecSandbox("exec-after-release");
   }
 
   @Test
