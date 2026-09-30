@@ -1,4 +1,6 @@
-# Note: additional setup is required, see https://www.jenkins.io/redirect/continuous-delivery-of-plugins
+# Continuous delivery (JEP-229) is enabled for this plugin: cd is set in
+# repository-permissions-updater and MAVEN_USERNAME/MAVEN_TOKEN are provisioned.
+# See https://www.jenkins.io/redirect/continuous-delivery-of-plugins
 #
 # Please find additional hints for individual trigger use case
 # configuration options inline this script below.
